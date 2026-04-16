@@ -13,7 +13,8 @@ export type PaneType =
 	| "webview"
 	| "file-viewer"
 	| "chat"
-	| "devtools";
+	| "devtools"
+	| "vscode";
 
 /**
  * Pane status for agent lifecycle indicators
@@ -142,6 +143,7 @@ export interface Pane {
 	chat?: ChatPaneState; // For chat panes
 	browser?: BrowserPaneState; // For browser (webview) panes
 	devtools?: DevToolsPaneState; // For devtools panes
+	vscode?: VscodePaneState; // For vscode panes
 	workspaceRun?: {
 		workspaceId: string;
 		state: "running" | "stopped-by-user" | "stopped-by-exit";
@@ -218,6 +220,16 @@ export interface BrowserPaneState {
 export interface DevToolsPaneState {
 	/** The pane ID of the browser pane being inspected */
 	targetPaneId: string;
+}
+
+/**
+ * VS Code pane-specific properties
+ * The server and WebContentsView live in the main process keyed by paneId —
+ * this state only captures what's needed to re-render after reload.
+ */
+export interface VscodePaneState {
+	/** Absolute worktree path this pane was opened against */
+	worktreePath: string;
 }
 
 /**
