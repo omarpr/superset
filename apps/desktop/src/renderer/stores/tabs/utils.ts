@@ -315,6 +315,55 @@ export const createDevToolsPane = (
 };
 
 /**
+ * Options for creating a vscode pane
+ */
+export interface CreateVscodePaneOptions {
+	worktreePath: string;
+}
+
+/**
+ * Creates a new vscode pane. The main process owns the server + WebContentsView;
+ * the pane state only records the worktree path for re-render.
+ */
+export const createVscodePane = (
+	tabId: string,
+	options: CreateVscodePaneOptions,
+): Pane => {
+	const id = generateId("pane");
+	return {
+		id,
+		tabId,
+		type: "vscode",
+		name: "VS Code",
+		vscode: { worktreePath: options.worktreePath },
+	};
+};
+
+/**
+ * Creates a new tab with a vscode pane atomically.
+ */
+export const createVscodeTabWithPane = (
+	workspaceId: string,
+	existingTabs: Tab[],
+	worktreePath: string,
+): { tab: Tab; pane: Pane } => {
+	const tabId = generateId("tab");
+	const pane = createVscodePane(tabId, { worktreePath });
+
+	const workspaceTabs = existingTabs.filter(
+		(t) => t.workspaceId === workspaceId,
+	);
+	const tab: Tab = {
+		id: tabId,
+		name: `VS Code ${workspaceTabs.filter((t) => t.name.startsWith("VS Code")).length + 1}`,
+		workspaceId,
+		layout: pane.id,
+		createdAt: Date.now(),
+	};
+	return { tab, pane };
+};
+
+/**
  * Creates a new tab with a browser pane atomically
  */
 export const createBrowserTabWithPane = (

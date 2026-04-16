@@ -38,6 +38,8 @@ import {
 	createFileViewerPane,
 	createPane,
 	createTabWithPane,
+	createVscodePane,
+	createVscodeTabWithPane,
 	equalizeSplitPercentages,
 	extractPaneIdsFromLayout,
 	findReusableFileViewerPane,
@@ -52,6 +54,7 @@ import {
 	resolveFileViewerMode,
 } from "./utils";
 import { killTerminalForPane } from "./utils/terminal-cleanup";
+import { killVscodeForPane } from "./utils/vscode-cleanup";
 
 /**
  * Finds the next best tab to activate when closing a tab.
@@ -374,10 +377,12 @@ export const useTabsStore = create<TabsStore>()(
 					);
 
 					for (const paneId of paneIds) {
-						// Only kill terminal sessions for terminal panes (avoids unnecessary IPC for file-viewers)
 						const pane = state.panes[paneId];
 						if (pane?.type === "terminal") {
 							killTerminalForPane(paneId);
+						}
+						if (pane?.type === "vscode") {
+							killVscodeForPane(paneId);
 						}
 
 						cleanupEditorPaneState(paneId);
@@ -1066,8 +1071,12 @@ export const useTabsStore = create<TabsStore>()(
 
 					// Kill terminal sessions for terminal panes
 					for (const id of paneIdsToRemove) {
-						if (state.panes[id]?.type === "terminal") {
+						const p = state.panes[id];
+						if (p?.type === "terminal") {
 							killTerminalForPane(id);
+						}
+						if (p?.type === "vscode") {
+							killVscodeForPane(id);
 						}
 
 						cleanupEditorPaneState(id);
@@ -1639,6 +1648,43 @@ export const useTabsStore = create<TabsStore>()(
 
 					posthog.capture("panel_opened", {
 						panel_type: "browser",
+						workspace_id: workspaceId,
+						pane_id: pane.id,
+					});
+
+					return { tabId: tab.id, paneId: pane.id };
+				},
+
+				addVscodeTab: (workspaceId, worktreePath) => {
+					const state = get();
+					const { tab, pane } = createVscodeTabWithPane(
+						workspaceId,
+						state.tabs,
+						worktreePath,
+					);
+
+					const currentActiveId = state.activeTabIds[workspaceId];
+					const historyStack = state.tabHistoryStacks[workspaceId] || [];
+					const newHistoryStack = currentActiveId
+						? [
+								currentActiveId,
+								...historyStack.filter((id) => id !== currentActiveId),
+							]
+						: historyStack;
+
+					set({
+						tabs: [...state.tabs, tab],
+						panes: { ...state.panes, [pane.id]: pane },
+						activeTabIds: { ...state.activeTabIds, [workspaceId]: tab.id },
+						focusedPaneIds: { ...state.focusedPaneIds, [tab.id]: pane.id },
+						tabHistoryStacks: {
+							...state.tabHistoryStacks,
+							[workspaceId]: newHistoryStack,
+						},
+					});
+
+					posthog.capture("panel_opened", {
+						panel_type: "vscode",
 						workspace_id: workspaceId,
 						pane_id: pane.id,
 					});

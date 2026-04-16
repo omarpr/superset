@@ -202,6 +202,10 @@ export interface TabsStore extends TabsState {
 		workspaceId: string,
 		url?: string,
 	) => { tabId: string; paneId: string };
+	addVscodeTab: (
+		workspaceId: string,
+		worktreePath: string,
+	) => { tabId: string; paneId: string };
 	openInBrowserPane: (workspaceId: string, url: string) => void;
 	updateBrowserUrl: (
 		paneId: string,
