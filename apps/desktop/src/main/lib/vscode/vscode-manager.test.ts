@@ -1,0 +1,90 @@
+import { describe, expect, it, mock } from "bun:test";
+import { EventEmitter } from "node:events";
+import { VscodeManager, type VscodeManagerDeps } from "./vscode-manager";
+
+class FakeServer extends EventEmitter {
+	started = false;
+	stopped = false;
+	constructor(public readonly port: number) {
+		super();
+	}
+	async start() {
+		this.started = true;
+		queueMicrotask(() =>
+			this.emit("ready", { url: `http://127.0.0.1:${this.port}/` }),
+		);
+	}
+	stop() {
+		this.stopped = true;
+	}
+}
+
+interface FakeView {
+	webContents: { loadURL: ReturnType<typeof mock>; close: ReturnType<typeof mock> };
+	setBounds: ReturnType<typeof mock>;
+	setVisible: ReturnType<typeof mock>;
+	destroyed: boolean;
+}
+
+function makeFakeView(): FakeView {
+	return {
+		webContents: { loadURL: mock(() => {}), close: mock(() => {}) },
+		setBounds: mock(() => {}),
+		setVisible: mock(() => {}),
+		destroyed: false,
+	};
+}
+
+function makeManager(overrides: Partial<VscodeManagerDeps> = {}) {
+	const window = {
+		contentView: {
+			addChildView: mock(() => {}),
+			removeChildView: mock(() => {}),
+		},
+		isDestroyed: () => false,
+	};
+	const deps: VscodeManagerDeps = {
+		getWindow: () => window as never,
+		findFreePort: async () => 40000,
+		isCodeCliAvailable: async () => true,
+		createServer: (port) => new FakeServer(port) as never,
+		createView: () => makeFakeView() as never,
+		...overrides,
+	};
+	return { manager: new VscodeManager(deps), window, deps };
+}
+
+describe("VscodeManager", () => {
+	it("start() spawns a server and attaches a hidden view", async () => {
+		const { manager, window } = makeManager();
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("ready");
+		expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
+	});
+
+	it("start() is idempotent for the same paneId", async () => {
+		const { manager, window } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
+	});
+
+	it("stop() removes the view and kills the server", async () => {
+		const { manager, window } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		manager.stop("p1");
+		expect(window.contentView.removeChildView).toHaveBeenCalledTimes(1);
+	});
+
+	it("start() resolves with status 'cli-missing' when the binary is absent", async () => {
+		const { manager } = makeManager({ isCodeCliAvailable: async () => false });
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("cli-missing");
+	});
+});

@@ -149,6 +149,15 @@ mock.module("electron", () => ({
 		buildFromTemplate: mock(() => ({})),
 		setApplicationMenu: mock(),
 	},
+	WebContentsView: mock(() => ({
+		webContents: {
+			loadURL: mock(() => {}),
+			close: mock(() => {}),
+		},
+		setBounds: mock(() => {}),
+		setVisible: mock(() => {}),
+		destroyed: false,
+	})),
 }));
 
 // =============================================================================
