@@ -31,6 +31,7 @@ import { resolveDevWorkspaceName } from "./lib/dev-workspace-name";
 import { setWorkspaceDockIcon } from "./lib/dock-icon";
 import { loadWebviewBrowserExtension } from "./lib/extensions";
 import { getHostServiceCoordinator } from "./lib/host-service-coordinator";
+import type { VscodeManager } from "./lib/vscode";
 import { localDb } from "./lib/local-db";
 import { ensureProjectIconsDir, getProjectIconPath } from "./lib/project-icons";
 import { initSentry } from "./lib/sentry";
@@ -109,6 +110,11 @@ export function focusMainWindow(): void {
 		// Triggers window creation via makeAppSetup's activate handler
 		app.emit("activate");
 	}
+}
+
+let activeVscodeManager: VscodeManager | null = null;
+export function registerVscodeManager(manager: VscodeManager | null): void {
+	activeVscodeManager = manager;
 }
 
 function registerWithMacOSNotificationCenter() {
@@ -205,6 +211,7 @@ app.on("before-quit", async (event) => {
 
 	isQuitting = true;
 	try {
+		activeVscodeManager?.stopAll();
 		getHostServiceCoordinator().releaseAll();
 		disposeTray();
 	} catch (error) {

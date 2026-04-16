@@ -24,10 +24,15 @@ import { createRingtoneRouter } from "./ringtone";
 import { createSettingsRouter } from "./settings";
 import { createTerminalRouter } from "./terminal";
 import { createUiStateRouter } from "./ui-state";
+import { createVscodeRouter } from "./vscode";
 import { createWindowRouter } from "./window";
 import { createWorkspacesRouter } from "./workspaces";
+import type { VscodeManager } from "main/lib/vscode";
 
-export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
+export const createAppRouter = (
+	getWindow: () => BrowserWindow | null,
+	vscodeManager: VscodeManager,
+) => {
 	return router({
 		chatRuntimeService: createChatRuntimeServiceRouter(),
 		chatService: createChatServiceRouter(),
@@ -55,6 +60,7 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		uiState: createUiStateRouter(),
 		ringtone: createRingtoneRouter(getWindow),
 		hostServiceCoordinator: createHostServiceCoordinatorRouter(),
+		vscode: createVscodeRouter(vscodeManager),
 	});
 };
 

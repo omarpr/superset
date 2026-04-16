@@ -16,6 +16,8 @@ import { createIPCHandler } from "trpc-electron/main";
 import { productName } from "~/package.json";
 import { appState } from "../lib/app-state";
 import { browserManager } from "../lib/browser/browser-manager";
+import { VscodeManager } from "../lib/vscode";
+import { registerVscodeManager } from "../index";
 import { createApplicationMenu } from "../lib/menu";
 import { playNotificationSound } from "../lib/notification-sound";
 import { NotificationManager } from "../lib/notifications/notification-manager";
@@ -130,6 +132,9 @@ export async function MainWindow() {
 
 	currentWindow = window;
 
+	const vscodeManager = new VscodeManager({ getWindow });
+	registerVscodeManager(vscodeManager);
+
 	// macOS Sequoia+: background throttling can corrupt GPU compositor layers
 	if (PLATFORM.IS_MAC) {
 		window.webContents.setBackgroundThrottling(false);
@@ -139,7 +144,7 @@ export async function MainWindow() {
 		ipcHandler.attachWindow(window);
 	} else {
 		ipcHandler = createIPCHandler({
-			router: createAppRouter(getWindow),
+			router: createAppRouter(getWindow, vscodeManager),
 			windows: [window],
 		});
 	}
@@ -312,6 +317,8 @@ export async function MainWindow() {
 		});
 		persistedZoomLevel = zoomLevel;
 
+		vscodeManager.stopAll();
+		registerVscodeManager(null);
 		browserManager.unregisterAll();
 		server.close();
 		notificationManager.dispose();
