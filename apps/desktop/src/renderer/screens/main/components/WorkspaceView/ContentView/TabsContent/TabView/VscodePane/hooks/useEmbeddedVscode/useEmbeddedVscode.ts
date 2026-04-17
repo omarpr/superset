@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useTabsStore } from "renderer/stores/tabs/store";
 
 export type VscodePhase =
 	| "idle"
@@ -10,6 +11,7 @@ export type VscodePhase =
 
 interface Options {
 	paneId: string;
+	tabId: string;
 	worktreePath: string;
 }
 
@@ -19,14 +21,20 @@ interface Result {
 	errorMessage: string | null;
 }
 
-export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
+export function useEmbeddedVscode({
+	paneId,
+	tabId,
+	worktreePath,
+}: Options): Result {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const [phase, setPhase] = useState<VscodePhase>("idle");
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+	const isPaneFocused = useTabsStore((s) => s.focusedPaneIds[tabId] === paneId);
 
 	const startMutation = electronTrpc.vscode.start.useMutation();
 	const setBoundsMutation = electronTrpc.vscode.setBounds.useMutation();
 	const setVisibleMutation = electronTrpc.vscode.setVisible.useMutation();
+	const focusMutation = electronTrpc.vscode.focus.useMutation();
 
 	useEffect(() => {
 		let cancelled = false;
@@ -114,8 +122,7 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 		};
 		const reconcile = () => {
 			const paneRect = el.getBoundingClientRect();
-			const overlays =
-				document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
+			const overlays = document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
 			for (const overlay of overlays) {
 				if (!isBlockingOverlay(overlay)) continue;
 				const r = overlay.getBoundingClientRect();
@@ -153,14 +160,37 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			attributeFilter: ["data-state"],
 		});
 
+		// Forward OS-level keyboard focus to the embedded webContents.
+		// Without this, the main window's document-level keydown listeners
+		// (react-hotkeys-hook) keep firing and swallow VS Code shortcuts.
+		const requestFocus = () => focusMutation.mutate({ paneId });
+		requestFocus();
+		el.addEventListener("focus", requestFocus, true);
+
 		return () => {
 			ro.disconnect();
 			mo.disconnect();
 			if (flushTimer !== null) window.clearTimeout(flushTimer);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
+			el.removeEventListener("focus", requestFocus, true);
 		};
-	}, [paneId, phase, setBoundsMutation.mutate, setVisibleMutation.mutate]);
+	}, [
+		paneId,
+		phase,
+		setBoundsMutation.mutate,
+		setVisibleMutation.mutate,
+		focusMutation.mutate,
+	]);
+
+	// Whenever the mosaic marks this pane as focused (e.g. via a click on the
+	// pane chrome or a keyboard pane-switch), hand keyboard focus back to the
+	// embedded webContents so VS Code receives shortcuts.
+	useEffect(() => {
+		if (phase !== "ready") return;
+		if (!isPaneFocused) return;
+		focusMutation.mutate({ paneId });
+	}, [paneId, phase, isPaneFocused, focusMutation.mutate]);
 
 	return { containerRef, phase, errorMessage };
 }

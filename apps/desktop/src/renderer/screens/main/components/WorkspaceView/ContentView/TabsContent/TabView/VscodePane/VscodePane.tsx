@@ -43,6 +43,7 @@ export function VscodePane({
 
 	const { containerRef, phase, errorMessage } = useEmbeddedVscode({
 		paneId,
+		tabId,
 		worktreePath,
 	});
 

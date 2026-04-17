@@ -1,9 +1,16 @@
 import { EventEmitter } from "node:events";
-import { type BrowserWindow, WebContentsView } from "electron";
+import type { BrowserWindow, WebContentsView } from "electron";
 import { getProcessEnvWithShellPath } from "../../../lib/trpc/routers/workspaces/utils/shell-env";
 import { isCodeCliAvailable as defaultIsCodeCliAvailable } from "./check-code-cli";
 import { findFreePort as defaultFindFreePort } from "./find-free-port";
 import { VscodeServer } from "./vscode-server";
+
+async function createDefaultView(): Promise<WebContentsView> {
+	const electron = await import("electron");
+	return new electron.WebContentsView({
+		webPreferences: { backgroundThrottling: false },
+	});
+}
 
 export type VscodeStartStatus = "ready" | "cli-missing" | "failed";
 
@@ -115,11 +122,7 @@ export class VscodeManager extends EventEmitter {
 				serverDataDir: this.deps.serverDataDir,
 			});
 
-		const view =
-			this.deps.createView?.() ??
-			new WebContentsView({
-				webPreferences: { backgroundThrottling: false },
-			});
+		const view = this.deps.createView?.() ?? (await createDefaultView());
 		view.setVisible(false);
 		view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 		window.contentView.addChildView(view);
@@ -191,6 +194,23 @@ export class VscodeManager extends EventEmitter {
 		const entry = this.entries.get(paneId);
 		if (!entry) return;
 		entry.view.setVisible(visible);
+	}
+
+	/**
+	 * Transfer OS-level keyboard focus to the embedded webContents. Needed
+	 * because the main window's document-level keydown listeners (react-
+	 * hotkeys-hook) keep swallowing VS Code shortcuts like `Cmd+P` unless
+	 * the child view is explicitly made first responder.
+	 */
+	focus(paneId: string): void {
+		const entry = this.entries.get(paneId);
+		if (!entry) return;
+		if (!entry.ready) return;
+		try {
+			entry.view.webContents.focus();
+		} catch {
+			// webContents may be destroyed mid-teardown
+		}
 	}
 
 	stop(paneId: string): void {

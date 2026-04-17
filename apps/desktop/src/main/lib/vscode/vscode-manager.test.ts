@@ -23,6 +23,7 @@ interface FakeView {
 	webContents: {
 		loadURL: ReturnType<typeof mock>;
 		close: ReturnType<typeof mock>;
+		focus: ReturnType<typeof mock>;
 	};
 	setBounds: ReturnType<typeof mock>;
 	setVisible: ReturnType<typeof mock>;
@@ -31,7 +32,11 @@ interface FakeView {
 
 function makeFakeView(): FakeView {
 	return {
-		webContents: { loadURL: mock(() => {}), close: mock(() => {}) },
+		webContents: {
+			loadURL: mock(() => {}),
+			close: mock(() => {}),
+			focus: mock(() => {}),
+		},
 		setBounds: mock(() => {}),
 		setVisible: mock(() => {}),
 		destroyed: false,
@@ -46,15 +51,20 @@ function makeManager(overrides: Partial<VscodeManagerDeps> = {}) {
 		},
 		isDestroyed: () => false,
 	};
+	const views: FakeView[] = [];
 	const deps: VscodeManagerDeps = {
 		getWindow: () => window as never,
 		findFreePort: async () => 40000,
 		isCodeCliAvailable: async () => true,
 		createServer: (port) => new FakeServer(port) as never,
-		createView: () => makeFakeView() as never,
+		createView: () => {
+			const v = makeFakeView();
+			views.push(v);
+			return v as never;
+		},
 		...overrides,
 	};
-	return { manager: new VscodeManager(deps), window, deps };
+	return { manager: new VscodeManager(deps), window, deps, views };
 }
 
 describe("VscodeManager", () => {
@@ -89,5 +99,18 @@ describe("VscodeManager", () => {
 			worktreePath: "/tmp/repo",
 		});
 		expect(result.status).toBe("cli-missing");
+	});
+
+	it("focus() forwards to the embedded webContents for a ready pane", async () => {
+		const { manager, views } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		manager.focus("p1");
+		expect(views[0]?.webContents.focus).toHaveBeenCalledTimes(1);
+	});
+
+	it("focus() is a no-op for unknown panes", () => {
+		const { manager, views } = makeManager();
+		manager.focus("unknown");
+		expect(views.length).toBe(0);
 	});
 });

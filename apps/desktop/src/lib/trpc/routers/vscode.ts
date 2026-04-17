@@ -42,6 +42,13 @@ export const createVscodeRouter = (vscodeManager: VscodeManager) => {
 				return { success: true };
 			}),
 
+		focus: publicProcedure
+			.input(z.object({ paneId: z.string().min(1) }))
+			.mutation(({ input }) => {
+				vscodeManager.focus(input.paneId);
+				return { success: true };
+			}),
+
 		stop: publicProcedure
 			.input(z.object({ paneId: z.string().min(1) }))
 			.mutation(({ input }) => {
