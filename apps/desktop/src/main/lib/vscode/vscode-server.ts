@@ -1,5 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 export interface VscodeServerOptions {
 	/** Path or name of the `code` binary. Pass "code" in production. */
@@ -7,6 +10,12 @@ export interface VscodeServerOptions {
 	worktreePath: string;
 	port: number;
 	env?: NodeJS.ProcessEnv;
+	/**
+	 * Isolate `code-tunnel serve-web`'s state to a dedicated directory so
+	 * concurrent panes don't share one data dir. Provide a path to override,
+	 * `false` to skip, or omit for a fresh temp dir.
+	 */
+	serverDataDir?: string | false;
 }
 
 export interface VscodeServerReadyEvent {
@@ -17,19 +26,23 @@ export interface VscodeServerExitEvent {
 	code: number | null;
 	signal: NodeJS.Signals | null;
 	reason: "exited" | "killed";
+	outputTail: string;
 }
 
 const READY_REGEX = /https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?[^\s]*/i;
+const OUTPUT_TAIL_MAX = 4000;
 
 /**
  * Wraps a `code serve-web` child process. Emits:
- *  - "ready"    { url }               once stdout surfaces a localhost URL
- *  - "exit"     { code, signal, reason } when the process dies
- *  - "stderr"   string                raw stderr chunks (for diagnostics)
+ *  - "ready"  { url }                          once a localhost URL is surfaced
+ *  - "exit"   { code, signal, reason, outputTail }
+ *  - "stderr" string                           raw stderr chunks (for diagnostics)
+ *  - "stdout" string                           raw stdout chunks (for diagnostics)
  */
 export class VscodeServer extends EventEmitter {
 	private child: ChildProcess | null = null;
 	private readyResolved = false;
+	private outputTail = "";
 
 	constructor(private readonly options: VscodeServerOptions) {
 		super();
@@ -37,7 +50,8 @@ export class VscodeServer extends EventEmitter {
 
 	async start(): Promise<void> {
 		if (this.child) return;
-		const { command, worktreePath, port, env } = this.options;
+		const { command, port, env } = this.options;
+		const serverDataDir = this.resolveUserDataDir();
 		const args = [
 			"serve-web",
 			"--host",
@@ -46,7 +60,7 @@ export class VscodeServer extends EventEmitter {
 			String(port),
 			"--without-connection-token",
 			"--accept-server-license-terms",
-			worktreePath,
+			...(serverDataDir ? ["--server-data-dir", serverDataDir] : []),
 		];
 		this.child = spawn(command, args, {
 			stdio: ["ignore", "pipe", "pipe"],
@@ -56,19 +70,16 @@ export class VscodeServer extends EventEmitter {
 
 		this.child.stdout?.on("data", (buf: Buffer) => {
 			const text = buf.toString();
-			if (!this.readyResolved) {
-				const match = text.match(READY_REGEX);
-				if (match) {
-					this.readyResolved = true;
-					this.emit("ready", {
-						url: match[0],
-					} satisfies VscodeServerReadyEvent);
-				}
-			}
+			this.appendOutputTail(text);
+			this.emit("stdout", text);
+			this.tryResolveReady(text);
 		});
 
 		this.child.stderr?.on("data", (buf: Buffer) => {
-			this.emit("stderr", buf.toString());
+			const text = buf.toString();
+			this.appendOutputTail(text);
+			this.emit("stderr", text);
+			this.tryResolveReady(text);
 		});
 
 		this.child.once("exit", (code, signal) => {
@@ -76,6 +87,7 @@ export class VscodeServer extends EventEmitter {
 				code,
 				signal,
 				reason: signal ? "killed" : "exited",
+				outputTail: this.outputTail,
 			};
 			this.child = null;
 			this.emit("exit", event);
@@ -101,5 +113,26 @@ export class VscodeServer extends EventEmitter {
 				}
 			}
 		}, 500).unref();
+	}
+
+	private tryResolveReady(text: string): void {
+		if (this.readyResolved) return;
+		const match = text.match(READY_REGEX);
+		if (match) {
+			this.readyResolved = true;
+			this.emit("ready", { url: match[0] } satisfies VscodeServerReadyEvent);
+		}
+	}
+
+	private appendOutputTail(chunk: string): void {
+		this.outputTail = (this.outputTail + chunk).slice(-OUTPUT_TAIL_MAX);
+	}
+
+	private resolveUserDataDir(): string | null {
+		if (this.options.serverDataDir === false) return null;
+		if (typeof this.options.serverDataDir === "string") {
+			return this.options.serverDataDir;
+		}
+		return mkdtempSync(path.join(tmpdir(), "superset-vscode-"));
 	}
 }

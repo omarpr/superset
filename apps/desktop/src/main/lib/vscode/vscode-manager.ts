@@ -45,6 +45,16 @@ interface Entry {
  * One coordinator for the whole app. Keyed by paneId.
  * Not exported as a singleton — `main/windows/main.ts` instantiates it with `getWindow`.
  */
+function appendFolderParam(url: string, folder: string): string {
+	try {
+		const parsed = new URL(url);
+		parsed.searchParams.set("folder", folder);
+		return parsed.toString();
+	} catch {
+		return url;
+	}
+}
+
 export class VscodeManager extends EventEmitter {
 	private readonly entries = new Map<string, Entry>();
 	private readonly pending = new Map<string, Promise<VscodeStartResult>>();
@@ -115,28 +125,43 @@ export class VscodeManager extends EventEmitter {
 		this.entries.set(paneId, entry);
 		this.emitStatus({ paneId, status: "starting" });
 
+		const onStderr = (chunk: string) => {
+			console.warn(`[vscode:${paneId}] stderr:`, chunk.trimEnd());
+		};
+		const onStdout = (chunk: string) => {
+			console.log(`[vscode:${paneId}] stdout:`, chunk.trimEnd());
+		};
+		server.on("stderr", onStderr);
+		server.on("stdout", onStdout);
+
 		const result = await new Promise<VscodeStartResult>((resolve) => {
 			const onReady = (info: { url: string }) => {
 				entry.ready = true;
-				view.webContents.loadURL(info.url);
+				const urlWithFolder = appendFolderParam(info.url, worktreePath);
+				view.webContents.loadURL(urlWithFolder);
 				this.emitStatus({ paneId, status: "ready" });
 				resolve({ status: "ready", port });
 			};
 			const onExit = (info: {
 				code: number | null;
 				signal: NodeJS.Signals | null;
+				outputTail?: string;
 			}) => {
 				server.off("ready", onReady);
+				server.off("stderr", onStderr);
+				server.off("stdout", onStdout);
 				this.cleanup(paneId);
+				const tail = info.outputTail?.trim();
+				const detail = `code=${info.code ?? "null"}${tail ? `\n${tail}` : ""}`;
 				this.emitStatus({
 					paneId,
 					status: "exited",
-					error: `exited (code=${info.code ?? "null"})`,
+					error: `exited (${detail})`,
 				});
 				if (!entry.ready) {
 					resolve({
 						status: "failed",
-						error: `child exited before ready (code=${info.code ?? "null"})`,
+						error: `child exited before ready (${detail})`,
 					});
 				}
 			};

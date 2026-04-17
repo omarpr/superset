@@ -1,7 +1,7 @@
 import { Button } from "@superset/ui/button";
 import { electronTrpcClient } from "renderer/lib/trpc-client";
 
-const DOCS_URL = "https://code.visualstudio.com/docs/editor/command-line";
+const DOCS_URL = "https://code.visualstudio.com/docs/setup/setup-overview";
 
 export function VscodeMissingCli() {
 	return (
