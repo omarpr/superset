@@ -144,11 +144,18 @@ export async function MainWindow() {
 	const vscodeBrowserSessionDir = join(vscodeSharedRoot, "browser-session");
 	mkdirSync(vscodeServerDataDir, { recursive: true });
 	mkdirSync(vscodeBrowserSessionDir, { recursive: true });
+	// PID file lets the next main-process lifetime reclaim a `code serve-web`
+	// child that survived a dev hot-reload or Electron crash. Without this,
+	// the orphan would hold the pinned port and push us onto an ephemeral
+	// one, changing the browser origin and resetting VS Code's IDB-backed
+	// UI state (walkthrough, sidebar width, recently opened, etc.) every launch.
+	const vscodePidFilePath = join(vscodeSharedRoot, "server.pid");
 	const vscodeManager = new VscodeManager({
 		getWindow,
 		serverDataDir: vscodeServerDataDir,
 		browserSessionDir: vscodeBrowserSessionDir,
 		preferredPort: DEFAULT_PREFERRED_VSCODE_PORT,
+		pidFilePath: vscodePidFilePath,
 	});
 	registerVscodeManager(vscodeManager);
 

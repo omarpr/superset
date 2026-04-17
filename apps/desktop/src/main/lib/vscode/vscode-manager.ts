@@ -4,6 +4,7 @@ import type { BrowserWindow, WebContentsView } from "electron";
 import { getProcessEnvWithShellPath } from "../../../lib/trpc/routers/workspaces/utils/shell-env";
 import { isCodeCliAvailable as defaultIsCodeCliAvailable } from "./check-code-cli";
 import { findFreePort as defaultFindFreePort } from "./find-free-port";
+import { reclaimOrphanServer } from "./reclaim-orphan-server";
 import { VscodeServer } from "./vscode-server";
 
 async function createDefaultView(
@@ -74,6 +75,14 @@ export interface VscodeManagerDeps {
 	 * across app restarts. Falls back to an ephemeral port if taken.
 	 */
 	preferredPort?: number;
+	/**
+	 * Optional on-disk path where the shared server records its child PID.
+	 * On startup, `ensureShared()` reclaims an orphan matching this PID
+	 * (from dev hot-reload or Electron crash) so the pinned port stays
+	 * bindable — which keeps the browser origin (and VS Code IDB/localStorage
+	 * state) stable across app restarts.
+	 */
+	pidFilePath?: string;
 }
 
 interface Entry {
@@ -113,6 +122,24 @@ async function isPortAvailable(port: number): Promise<boolean> {
 			probe.close(() => resolve(true));
 		});
 	});
+}
+
+/**
+ * Poll `isPortAvailable(port)` until it returns true or the deadline passes.
+ * Used after reclaiming an orphan: SIGKILL is synchronous but the kernel
+ * needs a moment to tear down the listening socket before we can bind again.
+ */
+async function waitForPortAvailable(
+	port: number,
+	timeoutMs: number,
+	intervalMs: number,
+): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (await isPortAvailable(port)) return true;
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+	return isPortAvailable(port);
 }
 
 /**
@@ -229,6 +256,19 @@ export class VscodeManager extends EventEmitter {
 			}
 
 			const preferred = this.deps.preferredPort;
+			const pidFilePath = this.deps.pidFilePath;
+			// Reclaim before port selection: a surviving child from a prior
+			// main-process lifetime (dev hot-reload / crash) will still be
+			// listening on `preferred`, and without this step
+			// `isPortAvailable(preferred)` returns false and we fall through
+			// to an ephemeral port — which changes the browser origin and
+			// wipes the IndexedDB bucket that stores VS Code UI state.
+			if (pidFilePath) {
+				const reclaimed = reclaimOrphanServer({ pidFilePath });
+				if (reclaimed && preferred !== undefined) {
+					await waitForPortAvailable(preferred, 2000, 100);
+				}
+			}
 			const findPort = this.deps.findFreePort ?? defaultFindFreePort;
 			const port =
 				preferred !== undefined && (await isPortAvailable(preferred))
@@ -245,6 +285,7 @@ export class VscodeManager extends EventEmitter {
 					port,
 					env: await getProcessEnvWithShellPath(),
 					serverDataDir: this.deps.serverDataDir,
+					pidFilePath,
 				});
 
 			let ready = false;

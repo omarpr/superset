@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -16,6 +16,13 @@ export interface VscodeServerOptions {
 	 * `false` to skip, or omit for a fresh temp dir.
 	 */
 	serverDataDir?: string | false;
+	/**
+	 * Optional on-disk path where the child PID is recorded after spawn and
+	 * removed on exit. Lets the next main-process lifetime reclaim an
+	 * orphaned child (dev hot-reload, Electron crash) before binding to the
+	 * pinned port. Omit to disable the PID file.
+	 */
+	pidFilePath?: string;
 }
 
 export interface VscodeServerReadyEvent {
@@ -68,6 +75,8 @@ export class VscodeServer extends EventEmitter {
 			detached: false,
 		});
 
+		this.writePidFile(this.child.pid);
+
 		this.child.stdout?.on("data", (buf: Buffer) => {
 			const text = buf.toString();
 			this.appendOutputTail(text);
@@ -90,6 +99,7 @@ export class VscodeServer extends EventEmitter {
 				outputTail: this.outputTail,
 			};
 			this.child = null;
+			this.removePidFile();
 			this.emit("exit", event);
 		});
 	}
@@ -134,5 +144,23 @@ export class VscodeServer extends EventEmitter {
 			return this.options.serverDataDir;
 		}
 		return mkdtempSync(path.join(tmpdir(), "superset-vscode-"));
+	}
+
+	private writePidFile(pid: number | undefined): void {
+		if (!this.options.pidFilePath || !pid) return;
+		try {
+			writeFileSync(this.options.pidFilePath, String(pid));
+		} catch {
+			// Non-fatal: reclaim will just fall back to ephemeral port next launch.
+		}
+	}
+
+	private removePidFile(): void {
+		if (!this.options.pidFilePath) return;
+		try {
+			unlinkSync(this.options.pidFilePath);
+		} catch {
+			// already gone
+		}
 	}
 }
