@@ -37,6 +37,10 @@ export interface VscodeManagerDeps {
 	getWindow: () => BrowserWindow | null;
 	/** Stable on-disk location for `code serve-web` state shared across panes. */
 	serverDataDir?: string;
+	/** Stable on-disk location for VS Code user settings (settings.json, keybindings.json). */
+	userDataDir?: string;
+	/** Stable on-disk location for installed VS Code extensions. */
+	extensionsDir?: string;
 	findFreePort?: () => Promise<number>;
 	isCodeCliAvailable?: () => Promise<boolean>;
 	createServer?: (port: number, worktreePath: string) => VscodeServer;
@@ -120,6 +124,8 @@ export class VscodeManager extends EventEmitter {
 				port,
 				env: await getProcessEnvWithShellPath(),
 				serverDataDir: this.deps.serverDataDir,
+				userDataDir: this.deps.userDataDir,
+				extensionsDir: this.deps.extensionsDir,
 			});
 
 		const view = this.deps.createView?.() ?? (await createDefaultView());
