@@ -340,22 +340,19 @@ export const createVscodePane = (
 };
 
 /**
- * Creates a new tab with a vscode pane atomically.
+ * Creates a new tab with a vscode pane atomically. The UI gates adding a VS
+ * Code tab to one per workspace, so the tab name doesn't need a suffix.
  */
 export const createVscodeTabWithPane = (
 	workspaceId: string,
-	existingTabs: Tab[],
 	worktreePath: string,
 ): { tab: Tab; pane: Pane } => {
 	const tabId = generateId("tab");
 	const pane = createVscodePane(tabId, { worktreePath });
 
-	const workspaceTabs = existingTabs.filter(
-		(t) => t.workspaceId === workspaceId,
-	);
 	const tab: Tab = {
 		id: tabId,
-		name: `VS Code ${workspaceTabs.filter((t) => t.name.startsWith("VS Code")).length + 1}`,
+		name: "VS Code",
 		workspaceId,
 		layout: pane.id,
 		createdAt: Date.now(),

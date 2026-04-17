@@ -8,6 +8,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@superset/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { BsTerminalPlus } from "react-icons/bs";
 import { HiMiniChevronDown } from "react-icons/hi2";
 import { LuPlus } from "react-icons/lu";
@@ -28,6 +29,8 @@ interface AddTabButtonProps {
 	onAddBrowser: () => void;
 	onAddVscode: () => void;
 	showVscode?: boolean;
+	vscodeDisabled?: boolean;
+	vscodeDisabledReason?: string;
 	onOpenPreset: (preset: TerminalPreset) => void;
 	onConfigurePresets: () => void;
 	onToggleShowPresetsBar: (enabled: boolean) => void;
@@ -45,6 +48,8 @@ export function AddTabButton({
 	onAddBrowser,
 	onAddVscode,
 	showVscode = true,
+	vscodeDisabled = false,
+	vscodeDisabledReason,
 	onOpenPreset,
 	onConfigurePresets,
 	onToggleShowPresetsBar,
@@ -83,16 +88,32 @@ export function AddTabButton({
 								<TbWorld className="size-3.5" />
 								Browser
 							</Button>
-							{showVscode && (
-								<Button
-									variant="ghost"
-									className="h-7 rounded-none border border-l-0 border-border/60 bg-muted/30 px-1.5 gap-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-									onClick={onAddVscode}
-								>
-									<VscVscode className="size-3.5" />
-									VS Code
-								</Button>
-							)}
+							{showVscode &&
+								(() => {
+									const button = (
+										<Button
+											variant="ghost"
+											disabled={vscodeDisabled}
+											className="h-7 rounded-none border border-l-0 border-border/60 bg-muted/30 px-1.5 gap-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+											onClick={onAddVscode}
+										>
+											<VscVscode className="size-3.5" />
+											VS Code
+										</Button>
+									);
+									if (!vscodeDisabled || !vscodeDisabledReason) return button;
+									// `disabled` strips pointer events from the Button, so the
+									// tooltip trigger has to live on a wrapping span to still
+									// receive hover.
+									return (
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<span className="inline-flex">{button}</span>
+											</TooltipTrigger>
+											<TooltipContent>{vscodeDisabledReason}</TooltipContent>
+										</Tooltip>
+									);
+								})()}
 							<DropdownMenuTrigger asChild>
 								<Button
 									variant="ghost"
@@ -134,9 +155,18 @@ export function AddTabButton({
 								<HotkeyMenuShortcut hotkeyId="NEW_BROWSER" />
 							</DropdownMenuItem>
 							{showVscode && (
-								<DropdownMenuItem onClick={onAddVscode} className="gap-2">
+								<DropdownMenuItem
+									onClick={onAddVscode}
+									disabled={vscodeDisabled}
+									className="gap-2"
+								>
 									<VscVscode className="size-4" />
 									<span>VS Code</span>
+									{vscodeDisabled && vscodeDisabledReason && (
+										<span className="ml-auto text-[10px] text-muted-foreground">
+											open
+										</span>
+									)}
 								</DropdownMenuItem>
 							)}
 							<DropdownMenuSeparator />

@@ -1658,7 +1658,6 @@ export const useTabsStore = create<TabsStore>()(
 					const state = get();
 					const { tab, pane } = createVscodeTabWithPane(
 						workspaceId,
-						state.tabs,
 						worktreePath,
 					);
 

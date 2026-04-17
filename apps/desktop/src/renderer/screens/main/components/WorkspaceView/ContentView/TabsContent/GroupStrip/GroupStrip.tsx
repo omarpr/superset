@@ -118,6 +118,22 @@ export function GroupStrip() {
 		[activeWorkspaceId, allTabs],
 	);
 
+	// `code serve-web` exposes one VS Code UI per `?folder=<worktreePath>` query
+	// and that UI's state (open editors, cursor, layout) is stored per-origin
+	// in IndexedDB. A second pane loading the same folder would fight over the
+	// same IDB bucket. Block the "add VS Code" path whenever any tab in this
+	// workspace already has a vscode pane.
+	const vscodeAlreadyOpen = useMemo(() => {
+		if (!activeWorkspaceId) return false;
+		const workspaceTabIds = new Set(tabs.map((t) => t.id));
+		for (const pane of Object.values(panes)) {
+			if (pane.type === "vscode" && workspaceTabIds.has(pane.tabId)) {
+				return true;
+			}
+		}
+		return false;
+	}, [activeWorkspaceId, panes, tabs]);
+
 	const activeTabId = useMemo(() => {
 		if (!activeWorkspaceId) return null;
 		return resolveActiveTabIdForWorkspace({
@@ -239,6 +255,7 @@ export function GroupStrip() {
 		if (vscodeBetaEnabled === false) return;
 		if (!activeWorkspaceId) return;
 		if (!workspace?.worktreePath) return;
+		if (vscodeAlreadyOpen) return;
 		addVscodeTab(activeWorkspaceId, workspace.worktreePath);
 	};
 
@@ -336,6 +353,10 @@ export function GroupStrip() {
 			onAddBrowser={handleAddBrowser}
 			onAddVscode={handleAddVscode}
 			showVscode={vscodeBetaEnabled !== false}
+			vscodeDisabled={vscodeAlreadyOpen}
+			vscodeDisabledReason={
+				vscodeAlreadyOpen ? "VS Code is already open in this workspace" : undefined
+			}
 			onOpenPreset={handleOpenPreset}
 			onConfigurePresets={handleOpenPresetsSettings}
 			onToggleShowPresetsBar={(enabled) =>
