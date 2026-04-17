@@ -50,10 +50,8 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 
 	const [vscodeBetaConfirmOpen, setVscodeBetaConfirmOpen] = useState(false);
 
-	const vscodePanes = useTabsStore((s) =>
-		Object.entries(s.panes)
-			.filter(([, p]) => p.type === "vscode")
-			.map(([id]) => id),
+	const vscodePaneCount = useTabsStore(
+		(s) => Object.values(s.panes).filter((p) => p.type === "vscode").length,
 	);
 	const removePane = useTabsStore((s) => s.removePane);
 
@@ -199,7 +197,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 		});
 
 	const handleVscodeBetaToggle = (enabled: boolean) => {
-		if (!enabled && vscodePanes.length > 0) {
+		if (!enabled && vscodePaneCount > 0) {
 			setVscodeBetaConfirmOpen(true);
 		} else {
 			setVscodeBetaEnabled.mutate({ enabled });
@@ -207,8 +205,11 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 	};
 
 	const handleVscodeBetaConfirm = () => {
-		for (const paneId of vscodePanes) {
-			removePane(paneId);
+		const panes = useTabsStore.getState().panes;
+		for (const [paneId, pane] of Object.entries(panes)) {
+			if (pane.type === "vscode") {
+				removePane(paneId);
+			}
 		}
 		setVscodeBetaEnabled.mutate({ enabled: false });
 		setVscodeBetaConfirmOpen(false);
@@ -262,7 +263,11 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 								id="vscode-beta"
 								checked={vscodeBetaEnabled ?? true}
 								onCheckedChange={handleVscodeBetaToggle}
-								disabled={isVscodeBetaLoading || setVscodeBetaEnabled.isPending}
+								disabled={
+									isVscodeBetaLoading ||
+									setVscodeBetaEnabled.isPending ||
+									vscodeBetaConfirmOpen
+								}
 							/>
 						</div>
 					)}
@@ -371,7 +376,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 				open={vscodeBetaConfirmOpen}
 				onOpenChange={setVscodeBetaConfirmOpen}
 				onConfirm={handleVscodeBetaConfirm}
-				vscodePaneCount={vscodePanes.length}
+				vscodePaneCount={vscodePaneCount}
 			/>
 		</>
 	);

@@ -1,5 +1,6 @@
 import {
 	AlertDialog,
+	AlertDialogAction,
 	AlertDialogContent,
 	AlertDialogDescription,
 	AlertDialogFooter,
@@ -43,14 +44,14 @@ export function VscodeDisableConfirmDialog({
 					>
 						Cancel
 					</Button>
-					<Button
+					<AlertDialogAction
 						variant="destructive"
 						size="sm"
 						className="h-7 px-3 text-xs"
 						onClick={onConfirm}
 					>
 						Disable
-					</Button>
+					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>
