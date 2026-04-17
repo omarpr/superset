@@ -1,4 +1,5 @@
 import type { BrowserWindow } from "electron";
+import type { VscodeManager } from "main/lib/vscode";
 import { router } from "..";
 import { createAnalyticsRouter } from "./analytics";
 import { createAuthRouter } from "./auth";
@@ -27,7 +28,6 @@ import { createUiStateRouter } from "./ui-state";
 import { createVscodeRouter } from "./vscode";
 import { createWindowRouter } from "./window";
 import { createWorkspacesRouter } from "./workspaces";
-import type { VscodeManager } from "main/lib/vscode";
 
 export const createAppRouter = (
 	getWindow: () => BrowserWindow | null,

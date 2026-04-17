@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 export interface VscodeServerOptions {
@@ -60,7 +60,9 @@ export class VscodeServer extends EventEmitter {
 				const match = text.match(READY_REGEX);
 				if (match) {
 					this.readyResolved = true;
-					this.emit("ready", { url: match[0] } satisfies VscodeServerReadyEvent);
+					this.emit("ready", {
+						url: match[0],
+					} satisfies VscodeServerReadyEvent);
 				}
 			}
 		});

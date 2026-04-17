@@ -1,8 +1,8 @@
 export { isCodeCliAvailable } from "./check-code-cli";
 export { findFreePort } from "./find-free-port";
 export {
-	VscodeManager,
 	type VscodeBounds,
+	VscodeManager,
 	type VscodeStartResult,
 	type VscodeStartStatus,
 	type VscodeStatusEvent,

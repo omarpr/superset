@@ -1,8 +1,5 @@
 import { observable } from "@trpc/server/observable";
-import type {
-	VscodeManager,
-	VscodeStatusEvent,
-} from "main/lib/vscode";
+import type { VscodeManager, VscodeStatusEvent } from "main/lib/vscode";
 import { z } from "zod";
 import { publicProcedure, router } from "..";
 

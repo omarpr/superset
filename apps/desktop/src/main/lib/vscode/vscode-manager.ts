@@ -78,7 +78,8 @@ export class VscodeManager extends EventEmitter {
 		paneId: string,
 		worktreePath: string,
 	): Promise<VscodeStartResult> {
-		const isAvailable = this.deps.isCodeCliAvailable ?? defaultIsCodeCliAvailable;
+		const isAvailable =
+			this.deps.isCodeCliAvailable ?? defaultIsCodeCliAvailable;
 		if (!(await isAvailable())) {
 			this.emitStatus({ paneId, status: "error", error: "cli-missing" });
 			return { status: "cli-missing" };

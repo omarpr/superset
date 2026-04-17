@@ -38,7 +38,6 @@ import {
 	createFileViewerPane,
 	createPane,
 	createTabWithPane,
-	createVscodePane,
 	createVscodeTabWithPane,
 	equalizeSplitPercentages,
 	extractPaneIdsFromLayout,

@@ -14,10 +14,9 @@ import {
 import type { AgentLifecycleEvent } from "shared/notification-types";
 import { createIPCHandler } from "trpc-electron/main";
 import { productName } from "~/package.json";
+import { registerVscodeManager } from "../index";
 import { appState } from "../lib/app-state";
 import { browserManager } from "../lib/browser/browser-manager";
-import { VscodeManager } from "../lib/vscode";
-import { registerVscodeManager } from "../index";
 import { createApplicationMenu } from "../lib/menu";
 import { playNotificationSound } from "../lib/notification-sound";
 import { NotificationManager } from "../lib/notifications/notification-manager";
@@ -30,6 +29,7 @@ import {
 	getNotificationTitle,
 	getWorkspaceName,
 } from "../lib/notifications/utils";
+import { VscodeManager } from "../lib/vscode";
 import {
 	getInitialWindowBounds,
 	loadWindowState,

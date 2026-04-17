@@ -20,7 +20,10 @@ class FakeServer extends EventEmitter {
 }
 
 interface FakeView {
-	webContents: { loadURL: ReturnType<typeof mock>; close: ReturnType<typeof mock> };
+	webContents: {
+		loadURL: ReturnType<typeof mock>;
+		close: ReturnType<typeof mock>;
+	};
 	setBounds: ReturnType<typeof mock>;
 	setVisible: ReturnType<typeof mock>;
 	destroyed: boolean;

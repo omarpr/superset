@@ -48,15 +48,18 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			.catch((error: unknown) => {
 				if (cancelled) return;
 				setPhase("failed");
-				setErrorMessage(
-					error instanceof Error ? error.message : String(error),
-				);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			});
 		return () => {
 			cancelled = true;
 			setVisibleMutation.mutate({ paneId, visible: false });
 		};
-	}, [paneId, worktreePath]);
+	}, [
+		paneId,
+		worktreePath,
+		setVisibleMutation.mutate,
+		startMutation.mutateAsync,
+	]);
 
 	useEffect(() => {
 		const el = containerRef.current;
@@ -85,7 +88,7 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			window.removeEventListener("resize", push);
 			window.removeEventListener("scroll", push, true);
 		};
-	}, [paneId, phase]);
+	}, [paneId, phase, setBoundsMutation.mutate, setVisibleMutation.mutate]);
 
 	return { containerRef, phase, errorMessage };
 }

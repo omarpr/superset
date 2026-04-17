@@ -13,7 +13,10 @@ describe("isCodeCliAvailable", () => {
 		const os = await import("node:os");
 		const path = await import("node:path");
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vscode-cli-"));
-		const bin = path.join(dir, process.platform === "win32" ? "code.cmd" : "code");
+		const bin = path.join(
+			dir,
+			process.platform === "win32" ? "code.cmd" : "code",
+		);
 		await fs.writeFile(bin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 		try {
 			const result = await isCodeCliAvailable({ PATH: dir });
