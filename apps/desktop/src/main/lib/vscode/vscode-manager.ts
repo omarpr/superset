@@ -8,7 +8,15 @@ import { VscodeServer } from "./vscode-server";
 async function createDefaultView(): Promise<WebContentsView> {
 	const electron = await import("electron");
 	return new electron.WebContentsView({
-		webPreferences: { backgroundThrottling: false },
+		webPreferences: {
+			backgroundThrottling: false,
+			// Persistent partition shared across all VS Code panes so
+			// browser-side state (UI settings, installed extension cache,
+			// theme prefs) survives pane restarts. `code serve-web` only
+			// exposes --server-data-dir for server state; anything the
+			// web UI persists lives in the Electron session storage.
+			partition: "persist:vscode",
+		},
 	});
 }
 
@@ -37,10 +45,6 @@ export interface VscodeManagerDeps {
 	getWindow: () => BrowserWindow | null;
 	/** Stable on-disk location for `code serve-web` state shared across panes. */
 	serverDataDir?: string;
-	/** Stable on-disk location for VS Code user settings (settings.json, keybindings.json). */
-	userDataDir?: string;
-	/** Stable on-disk location for installed VS Code extensions. */
-	extensionsDir?: string;
 	findFreePort?: () => Promise<number>;
 	isCodeCliAvailable?: () => Promise<boolean>;
 	createServer?: (port: number, worktreePath: string) => VscodeServer;
@@ -124,8 +128,6 @@ export class VscodeManager extends EventEmitter {
 				port,
 				env: await getProcessEnvWithShellPath(),
 				serverDataDir: this.deps.serverDataDir,
-				userDataDir: this.deps.userDataDir,
-				extensionsDir: this.deps.extensionsDir,
 			});
 
 		const view = this.deps.createView?.() ?? (await createDefaultView());

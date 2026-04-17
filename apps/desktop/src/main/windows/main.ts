@@ -137,21 +137,10 @@ export async function MainWindow() {
 		app.getPath("userData"),
 		"vscode-server-data",
 	);
-	const vscodeUserDataDir = join(app.getPath("userData"), "vscode-user-data");
-	const vscodeExtensionsDir = join(
-		app.getPath("userData"),
-		"vscode-extensions",
-	);
-	// Shared across all VS Code panes so settings/extensions persist.
-	// VS Code may log SingletonLock warnings under concurrent writes.
 	mkdirSync(vscodeServerDataDir, { recursive: true });
-	mkdirSync(vscodeUserDataDir, { recursive: true });
-	mkdirSync(vscodeExtensionsDir, { recursive: true });
 	const vscodeManager = new VscodeManager({
 		getWindow,
 		serverDataDir: vscodeServerDataDir,
-		userDataDir: vscodeUserDataDir,
-		extensionsDir: vscodeExtensionsDir,
 	});
 	registerVscodeManager(vscodeManager);
 

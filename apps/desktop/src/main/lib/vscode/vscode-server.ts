@@ -16,16 +16,6 @@ export interface VscodeServerOptions {
 	 * `false` to skip, or omit for a fresh temp dir.
 	 */
 	serverDataDir?: string | false;
-	/**
-	 * Persist user-level settings (settings.json, keybindings.json) across
-	 * panes and restarts. Omit to fall back to VS Code's default location.
-	 */
-	userDataDir?: string;
-	/**
-	 * Persist installed extensions across panes and restarts. Omit to fall
-	 * back to VS Code's default location.
-	 */
-	extensionsDir?: string;
 }
 
 export interface VscodeServerReadyEvent {
@@ -60,8 +50,8 @@ export class VscodeServer extends EventEmitter {
 
 	async start(): Promise<void> {
 		if (this.child) return;
-		const { command, port, env, userDataDir, extensionsDir } = this.options;
-		const serverDataDir = this.resolveUserDataDir();
+		const { command, port, env } = this.options;
+		const serverDataDir = this.resolveServerDataDir();
 		const args = [
 			"serve-web",
 			"--host",
@@ -71,8 +61,6 @@ export class VscodeServer extends EventEmitter {
 			"--without-connection-token",
 			"--accept-server-license-terms",
 			...(serverDataDir ? ["--server-data-dir", serverDataDir] : []),
-			...(userDataDir ? ["--user-data-dir", userDataDir] : []),
-			...(extensionsDir ? ["--extensions-dir", extensionsDir] : []),
 		];
 		this.child = spawn(command, args, {
 			stdio: ["ignore", "pipe", "pipe"],
@@ -140,7 +128,7 @@ export class VscodeServer extends EventEmitter {
 		this.outputTail = (this.outputTail + chunk).slice(-OUTPUT_TAIL_MAX);
 	}
 
-	private resolveUserDataDir(): string | null {
+	private resolveServerDataDir(): string | null {
 		if (this.options.serverDataDir === false) return null;
 		if (typeof this.options.serverDataDir === "string") {
 			return this.options.serverDataDir;
