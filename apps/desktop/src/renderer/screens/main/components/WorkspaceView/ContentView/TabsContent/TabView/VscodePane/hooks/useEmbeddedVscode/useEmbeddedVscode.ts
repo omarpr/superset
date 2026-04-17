@@ -77,16 +77,69 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			});
 		};
 		push();
-		setVisibleMutation.mutate({ paneId, visible: true });
 
-		const ro = new ResizeObserver(push);
+		// WebContentsView is a native OS-level view composited above all HTML in
+		// the window, so no CSS z-index can put overlays on top of it. Hide the
+		// view whenever a Radix popper (dropdown/popover/tooltip/menu) or a
+		// role=dialog overlay is open and visually intersects the pane rect.
+		let currentVisible = false;
+		const setVisible = (visible: boolean) => {
+			if (visible === currentVisible) return;
+			currentVisible = visible;
+			setVisibleMutation.mutate({ paneId, visible });
+		};
+		const OVERLAY_SELECTOR =
+			'[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]';
+		const rectsIntersect = (a: DOMRect, b: DOMRect) =>
+			a.right > b.left &&
+			a.left < b.right &&
+			a.bottom > b.top &&
+			a.top < b.bottom;
+		const reconcile = () => {
+			const paneRect = el.getBoundingClientRect();
+			const overlays =
+				document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
+			for (const overlay of overlays) {
+				const r = overlay.getBoundingClientRect();
+				if (r.width === 0 || r.height === 0) continue;
+				if (rectsIntersect(r, paneRect)) {
+					setVisible(false);
+					return;
+				}
+			}
+			setVisible(true);
+		};
+		reconcile();
+
+		const ro = new ResizeObserver(() => {
+			push();
+			reconcile();
+		});
 		ro.observe(el);
-		window.addEventListener("resize", push);
-		window.addEventListener("scroll", push, true);
+		const onResize = () => {
+			push();
+			reconcile();
+		};
+		const onScroll = () => {
+			push();
+			reconcile();
+		};
+		window.addEventListener("resize", onResize);
+		window.addEventListener("scroll", onScroll, true);
+
+		const mo = new MutationObserver(reconcile);
+		mo.observe(document.body, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ["data-state", "style"],
+		});
+
 		return () => {
 			ro.disconnect();
-			window.removeEventListener("resize", push);
-			window.removeEventListener("scroll", push, true);
+			mo.disconnect();
+			window.removeEventListener("resize", onResize);
+			window.removeEventListener("scroll", onScroll, true);
 		};
 	}, [paneId, phase, setBoundsMutation.mutate, setVisibleMutation.mutate]);
 

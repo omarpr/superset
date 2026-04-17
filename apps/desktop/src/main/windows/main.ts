@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { workspaces, worktrees } from "@superset/local-db";
 import { eq } from "drizzle-orm";
@@ -132,7 +133,12 @@ export async function MainWindow() {
 
 	currentWindow = window;
 
-	const vscodeManager = new VscodeManager({ getWindow });
+	const vscodeServerDataDir = join(app.getPath("userData"), "vscode-server-data");
+	mkdirSync(vscodeServerDataDir, { recursive: true });
+	const vscodeManager = new VscodeManager({
+		getWindow,
+		serverDataDir: vscodeServerDataDir,
+	});
 	registerVscodeManager(vscodeManager);
 
 	// macOS Sequoia+: background throttling can corrupt GPU compositor layers

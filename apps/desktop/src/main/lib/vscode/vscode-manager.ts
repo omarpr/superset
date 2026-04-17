@@ -28,6 +28,8 @@ export interface VscodeStatusEvent {
 
 export interface VscodeManagerDeps {
 	getWindow: () => BrowserWindow | null;
+	/** Stable on-disk location for `code serve-web` state shared across panes. */
+	serverDataDir?: string;
 	findFreePort?: () => Promise<number>;
 	isCodeCliAvailable?: () => Promise<boolean>;
 	createServer?: (port: number, worktreePath: string) => VscodeServer;
@@ -110,6 +112,7 @@ export class VscodeManager extends EventEmitter {
 				worktreePath,
 				port,
 				env: await getProcessEnvWithShellPath(),
+				serverDataDir: this.deps.serverDataDir,
 			});
 
 		const view =
