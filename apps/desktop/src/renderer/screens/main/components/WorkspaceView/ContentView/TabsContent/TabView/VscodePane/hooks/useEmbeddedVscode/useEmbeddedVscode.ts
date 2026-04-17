@@ -80,13 +80,25 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 
 		// WebContentsView is a native OS-level view composited above all HTML in
 		// the window, so no CSS z-index can put overlays on top of it. Hide the
-		// view whenever a Radix popper (dropdown/popover/tooltip/menu) or a
-		// role=dialog overlay is open and visually intersects the pane rect.
+		// view whenever a blocking Radix overlay (dropdown/popover/menu/dialog)
+		// is open and visually intersects the pane rect. Tooltips are excluded:
+		// they're small and hover-triggered, so toggling visibility on them
+		// causes visible flicker as the mouse moves across UI chrome.
 		let currentVisible = false;
-		const setVisible = (visible: boolean) => {
-			if (visible === currentVisible) return;
-			currentVisible = visible;
-			setVisibleMutation.mutate({ paneId, visible });
+		let pendingVisible: boolean | null = null;
+		let flushTimer: number | null = null;
+		const flush = () => {
+			flushTimer = null;
+			if (pendingVisible === null || pendingVisible === currentVisible) return;
+			currentVisible = pendingVisible;
+			setVisibleMutation.mutate({ paneId, visible: currentVisible });
+		};
+		const scheduleVisible = (visible: boolean) => {
+			pendingVisible = visible;
+			if (flushTimer !== null) return;
+			// Coalesce bursts of mutations (e.g. popper position/style updates)
+			// into a single IPC call on the next tick.
+			flushTimer = window.setTimeout(flush, 16);
 		};
 		const OVERLAY_SELECTOR =
 			'[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]';
@@ -95,19 +107,25 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			a.left < b.right &&
 			a.bottom > b.top &&
 			a.top < b.bottom;
+		const isBlockingOverlay = (overlay: HTMLElement): boolean => {
+			// Radix tooltip content carries role="tooltip" — skip it.
+			if (overlay.querySelector('[role="tooltip"]')) return false;
+			return true;
+		};
 		const reconcile = () => {
 			const paneRect = el.getBoundingClientRect();
 			const overlays =
 				document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
 			for (const overlay of overlays) {
+				if (!isBlockingOverlay(overlay)) continue;
 				const r = overlay.getBoundingClientRect();
 				if (r.width === 0 || r.height === 0) continue;
 				if (rectsIntersect(r, paneRect)) {
-					setVisible(false);
+					scheduleVisible(false);
 					return;
 				}
 			}
-			setVisible(true);
+			scheduleVisible(true);
 		};
 		reconcile();
 
@@ -132,12 +150,13 @@ export function useEmbeddedVscode({ paneId, worktreePath }: Options): Result {
 			childList: true,
 			subtree: true,
 			attributes: true,
-			attributeFilter: ["data-state", "style"],
+			attributeFilter: ["data-state"],
 		});
 
 		return () => {
 			ro.disconnect();
 			mo.disconnect();
+			if (flushTimer !== null) window.clearTimeout(flushTimer);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
 		};
