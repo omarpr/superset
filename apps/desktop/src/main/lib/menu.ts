@@ -11,11 +11,6 @@ import {
 import { menuEmitter } from "./menu-events";
 
 export function createApplicationMenu() {
-	const reloadAccelerator = "CmdOrCtrl+R";
-	const closeAccelerator = "CmdOrCtrl+Shift+Q";
-	const showHotkeysAccelerator = "CmdOrCtrl+/";
-	const openSettingsAccelerator = "CmdOrCtrl+,";
-
 	const template: Electron.MenuItemConstructorOptions[] = [
 		{
 			label: "Edit",
@@ -34,7 +29,6 @@ export function createApplicationMenu() {
 			submenu: [
 				{
 					label: "Reload",
-					accelerator: reloadAccelerator,
 					click: () => {
 						BrowserWindow.getFocusedWindow()?.reload();
 					},
@@ -55,7 +49,7 @@ export function createApplicationMenu() {
 				{ role: "minimize" },
 				{ role: "zoom" },
 				{ type: "separator" },
-				{ role: "close", accelerator: closeAccelerator },
+				{ role: "close" },
 			],
 		},
 		{
@@ -89,7 +83,6 @@ export function createApplicationMenu() {
 				{ type: "separator" },
 				{
 					label: "Keyboard Shortcuts",
-					accelerator: showHotkeysAccelerator,
 					click: () => {
 						menuEmitter.emit("open-settings", "keyboard");
 					},
@@ -142,7 +135,6 @@ export function createApplicationMenu() {
 				{ type: "separator" },
 				{
 					label: "Settings...",
-					accelerator: openSettingsAccelerator,
 					click: () => {
 						menuEmitter.emit("open-settings");
 					},
