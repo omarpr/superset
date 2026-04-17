@@ -61,6 +61,8 @@ export function GroupStrip() {
 	const tabsTrackRef = useRef<HTMLDivElement>(null);
 	const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
 	const utils = electronTrpc.useUtils();
+	const { data: vscodeBetaEnabled } =
+		electronTrpc.settings.getVscodeBetaEnabled.useQuery();
 	const { data: showPresetsBar } =
 		electronTrpc.settings.getShowPresetsBar.useQuery();
 	const { data: useCompactTerminalAddButton } =
@@ -234,6 +236,7 @@ export function GroupStrip() {
 	};
 
 	const handleAddVscode = () => {
+		if (vscodeBetaEnabled === false) return;
 		if (!activeWorkspaceId) return;
 		if (!workspace?.worktreePath) return;
 		addVscodeTab(activeWorkspaceId, workspace.worktreePath);
@@ -332,6 +335,7 @@ export function GroupStrip() {
 			onAddChat={handleAddChat}
 			onAddBrowser={handleAddBrowser}
 			onAddVscode={handleAddVscode}
+			showVscode={vscodeBetaEnabled !== false}
 			onOpenPreset={handleOpenPreset}
 			onConfigurePresets={handleOpenPresetsSettings}
 			onToggleShowPresetsBar={(enabled) =>

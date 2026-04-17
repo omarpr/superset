@@ -27,6 +27,7 @@ interface AddTabButtonProps {
 	onAddChat: () => void;
 	onAddBrowser: () => void;
 	onAddVscode: () => void;
+	showVscode?: boolean;
 	onOpenPreset: (preset: TerminalPreset) => void;
 	onConfigurePresets: () => void;
 	onToggleShowPresetsBar: (enabled: boolean) => void;
@@ -43,6 +44,7 @@ export function AddTabButton({
 	onAddChat,
 	onAddBrowser,
 	onAddVscode,
+	showVscode = true,
 	onOpenPreset,
 	onConfigurePresets,
 	onToggleShowPresetsBar,
@@ -81,14 +83,16 @@ export function AddTabButton({
 								<TbWorld className="size-3.5" />
 								Browser
 							</Button>
-							<Button
-								variant="ghost"
-								className="h-7 rounded-none border border-l-0 border-border/60 bg-muted/30 px-1.5 gap-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-								onClick={onAddVscode}
-							>
-								<VscVscode className="size-3.5" />
-								VS Code
-							</Button>
+							{showVscode && (
+								<Button
+									variant="ghost"
+									className="h-7 rounded-none border border-l-0 border-border/60 bg-muted/30 px-1.5 gap-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+									onClick={onAddVscode}
+								>
+									<VscVscode className="size-3.5" />
+									VS Code
+								</Button>
+							)}
 							<DropdownMenuTrigger asChild>
 								<Button
 									variant="ghost"
@@ -129,10 +133,12 @@ export function AddTabButton({
 								<span>Browser</span>
 								<HotkeyMenuShortcut hotkeyId="NEW_BROWSER" />
 							</DropdownMenuItem>
-							<DropdownMenuItem onClick={onAddVscode} className="gap-2">
-								<VscVscode className="size-4" />
-								<span>VS Code</span>
-							</DropdownMenuItem>
+							{showVscode && (
+								<DropdownMenuItem onClick={onAddVscode} className="gap-2">
+									<VscVscode className="size-4" />
+									<span>VS Code</span>
+								</DropdownMenuItem>
+							)}
 							<DropdownMenuSeparator />
 						</>
 					)}

@@ -1,7 +1,7 @@
 import "react-mosaic-component/react-mosaic-component.css";
 import "./mosaic-theme.css";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
 import {
 	Mosaic,
 	type MosaicBranch,
@@ -25,7 +25,10 @@ import { MosaicSplitOverlay } from "./components";
 import { DevToolsPane } from "./DevToolsPane";
 import { FileViewerPane } from "./FileViewerPane";
 import { TabPane } from "./TabPane";
-import { VscodePane } from "./VscodePane";
+
+const VscodePane = lazy(() =>
+	import("./VscodePane").then((m) => ({ default: m.VscodePane })),
+);
 
 export const MOSAIC_ID = "superset-mosaic";
 
@@ -234,15 +237,17 @@ export function TabView({ tab }: TabViewProps) {
 
 			if (paneInfo.type === "vscode") {
 				return (
-					<VscodePane
-						paneId={paneId}
-						path={path}
-						tabId={tab.id}
-						workspaceId={tab.workspaceId}
-						splitPaneAuto={splitPaneAuto}
-						removePane={removePane}
-						setFocusedPane={setFocusedPane}
-					/>
+					<Suspense fallback={null}>
+						<VscodePane
+							paneId={paneId}
+							path={path}
+							tabId={tab.id}
+							workspaceId={tab.workspaceId}
+							splitPaneAuto={splitPaneAuto}
+							removePane={removePane}
+							setFocusedPane={setFocusedPane}
+						/>
+					</Suspense>
 				);
 			}
 
