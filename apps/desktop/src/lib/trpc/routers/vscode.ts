@@ -1,5 +1,9 @@
 import { observable } from "@trpc/server/observable";
-import type { VscodeManager, VscodeStatusEvent } from "main/lib/vscode";
+import type {
+	VscodeFocusEvent,
+	VscodeManager,
+	VscodeStatusEvent,
+} from "main/lib/vscode";
 import { z } from "zod";
 import { publicProcedure, router } from "..";
 
@@ -67,5 +71,15 @@ export const createVscodeRouter = (vscodeManager: VscodeManager) => {
 					};
 				});
 			}),
+
+		onFocus: publicProcedure.subscription(() => {
+			return observable<VscodeFocusEvent>((emit) => {
+				const handler = (event: VscodeFocusEvent) => emit.next(event);
+				vscodeManager.on("focus", handler);
+				return () => {
+					vscodeManager.off("focus", handler);
+				};
+			});
+		}),
 	});
 };

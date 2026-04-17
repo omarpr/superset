@@ -30,7 +30,7 @@ import {
 	getNotificationTitle,
 	getWorkspaceName,
 } from "../lib/notifications/utils";
-import { VscodeManager } from "../lib/vscode";
+import { DEFAULT_PREFERRED_VSCODE_PORT, VscodeManager } from "../lib/vscode";
 import {
 	getInitialWindowBounds,
 	loadWindowState,
@@ -141,6 +141,7 @@ export async function MainWindow() {
 	const vscodeManager = new VscodeManager({
 		getWindow,
 		serverDataDir: vscodeServerDataDir,
+		preferredPort: DEFAULT_PREFERRED_VSCODE_PORT,
 	});
 	registerVscodeManager(vscodeManager);
 

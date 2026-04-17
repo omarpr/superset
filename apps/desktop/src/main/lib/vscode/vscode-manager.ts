@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createServer as createNetServer } from "node:net";
 import type { BrowserWindow, WebContentsView } from "electron";
 import { getProcessEnvWithShellPath } from "../../../lib/trpc/routers/workspaces/utils/shell-env";
 import { isCodeCliAvailable as defaultIsCodeCliAvailable } from "./check-code-cli";
@@ -41,27 +42,47 @@ export interface VscodeStatusEvent {
 	error?: string;
 }
 
+export interface VscodeFocusEvent {
+	paneId: string;
+	focused: boolean;
+}
+
 export interface VscodeManagerDeps {
 	getWindow: () => BrowserWindow | null;
 	/** Stable on-disk location for `code serve-web` state shared across panes. */
 	serverDataDir?: string;
 	findFreePort?: () => Promise<number>;
 	isCodeCliAvailable?: () => Promise<boolean>;
-	createServer?: (port: number, worktreePath: string) => VscodeServer;
+	createServer?: (port: number) => VscodeServer;
 	createView?: () => WebContentsView;
+	/**
+	 * Preferred port for the shared `code serve-web` process. When free the
+	 * server binds here on every launch so the browser-side origin (and thus
+	 * IndexedDB/localStorage buckets for VS Code UI state) remain stable
+	 * across app restarts. Falls back to an ephemeral port if taken.
+	 */
+	preferredPort?: number;
 }
 
 interface Entry {
-	server: VscodeServer;
 	view: WebContentsView;
+	worktreePath: string;
+}
+
+interface SharedServer {
+	server: VscodeServer;
 	port: number;
-	ready: boolean;
+	/** Resolves to the base URL once the child is ready; rejects on early exit. */
+	readyUrl: Promise<string>;
 }
 
 /**
- * One coordinator for the whole app. Keyed by paneId.
- * Not exported as a singleton — `main/windows/main.ts` instantiates it with `getWindow`.
+ * Default port the shared `code serve-web` process binds to when it's free.
+ * Pinned so the browser origin (and thus VS Code UI IndexedDB/localStorage
+ * buckets) survive app restarts. Falls back to an ephemeral port otherwise.
  */
+export const DEFAULT_PREFERRED_VSCODE_PORT = 51851;
+
 function appendFolderParam(url: string, folder: string): string {
 	try {
 		const parsed = new URL(url);
@@ -72,9 +93,33 @@ function appendFolderParam(url: string, folder: string): string {
 	}
 }
 
+async function isPortAvailable(port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const probe = createNetServer();
+		probe.once("error", () => resolve(false));
+		probe.listen(port, "127.0.0.1", () => {
+			probe.close(() => resolve(true));
+		});
+	});
+}
+
+/**
+ * One coordinator for the whole app. All VS Code panes share a single
+ * `code serve-web` process so every pane's WebContentsView loads from the
+ * same `http://127.0.0.1:<port>` origin — which is what keeps IndexedDB and
+ * localStorage bucket-consistent across panes (and, with port pinning,
+ * across app restarts). Per-pane state comes from the `?folder=` query.
+ *
+ * Not exported as a singleton — `main/windows/main.ts` instantiates it with
+ * `getWindow`.
+ */
 export class VscodeManager extends EventEmitter {
 	private readonly entries = new Map<string, Entry>();
 	private readonly pending = new Map<string, Promise<VscodeStartResult>>();
+	private shared: SharedServer | null = null;
+	private sharedPending: Promise<
+		SharedServer | { error: VscodeStartResult }
+	> | null = null;
 
 	constructor(private readonly deps: VscodeManagerDeps) {
 		super();
@@ -87,7 +132,7 @@ export class VscodeManager extends EventEmitter {
 		const { paneId, worktreePath } = args;
 		const existing = this.entries.get(paneId);
 		if (existing) {
-			return { status: "ready", port: existing.port };
+			return { status: "ready", port: this.shared?.port };
 		}
 		const inflight = this.pending.get(paneId);
 		if (inflight) return inflight;
@@ -105,86 +150,144 @@ export class VscodeManager extends EventEmitter {
 		paneId: string,
 		worktreePath: string,
 	): Promise<VscodeStartResult> {
-		const isAvailable =
-			this.deps.isCodeCliAvailable ?? defaultIsCodeCliAvailable;
-		if (!(await isAvailable())) {
-			this.emitStatus({ paneId, status: "error", error: "cli-missing" });
-			return { status: "cli-missing" };
-		}
+		const sharedOrError = await this.ensureShared();
+		if ("error" in sharedOrError) return sharedOrError.error;
+		const shared = sharedOrError;
 
 		const window = this.deps.getWindow();
 		if (!window || window.isDestroyed()) {
 			return { status: "failed", error: "no-window" };
 		}
 
-		const findPort = this.deps.findFreePort ?? defaultFindFreePort;
-		const port = await findPort();
-
-		const server =
-			this.deps.createServer?.(port, worktreePath) ??
-			new VscodeServer({
-				command: "code",
-				worktreePath,
-				port,
-				env: await getProcessEnvWithShellPath(),
-				serverDataDir: this.deps.serverDataDir,
-			});
-
 		const view = this.deps.createView?.() ?? (await createDefaultView());
 		view.setVisible(false);
 		view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 		window.contentView.addChildView(view);
 
-		const entry: Entry = { server, view, port, ready: false };
-		this.entries.set(paneId, entry);
-		this.emitStatus({ paneId, status: "starting" });
-
-		const onStderr = (chunk: string) => {
-			console.warn(`[vscode:${paneId}] stderr:`, chunk.trimEnd());
-		};
-		const onStdout = (chunk: string) => {
-			console.log(`[vscode:${paneId}] stdout:`, chunk.trimEnd());
-		};
-		server.on("stderr", onStderr);
-		server.on("stdout", onStdout);
-
-		const result = await new Promise<VscodeStartResult>((resolve) => {
-			const onReady = (info: { url: string }) => {
-				entry.ready = true;
-				const urlWithFolder = appendFolderParam(info.url, worktreePath);
-				view.webContents.loadURL(urlWithFolder);
-				this.emitStatus({ paneId, status: "ready" });
-				resolve({ status: "ready", port });
-			};
-			const onExit = (info: {
-				code: number | null;
-				signal: NodeJS.Signals | null;
-				outputTail?: string;
-			}) => {
-				server.off("ready", onReady);
-				server.off("stderr", onStderr);
-				server.off("stdout", onStdout);
-				this.cleanup(paneId);
-				const tail = info.outputTail?.trim();
-				const detail = `code=${info.code ?? "null"}${tail ? `\n${tail}` : ""}`;
-				this.emitStatus({
-					paneId,
-					status: "exited",
-					error: `exited (${detail})`,
-				});
-				if (!entry.ready) {
-					resolve({
-						status: "failed",
-						error: `child exited before ready (${detail})`,
-					});
-				}
-			};
-			server.once("ready", onReady);
-			server.once("exit", onExit);
-			void server.start();
+		// Forward OS-level focus/blur to the renderer so `useHotkey` can skip
+		// Superset hotkeys while the embedded IDE owns keyboard input. Without
+		// this, `react-hotkeys-hook`'s document listener fires even though the
+		// WebContentsView has focus, intercepting Cmd+P before VS Code sees it.
+		view.webContents.on("focus", () => {
+			this.emitFocus({ paneId, focused: true });
+		});
+		view.webContents.on("blur", () => {
+			this.emitFocus({ paneId, focused: false });
 		});
 
-		return result;
+		this.entries.set(paneId, { view, worktreePath });
+		this.emitStatus({ paneId, status: "starting" });
+
+		let baseUrl: string;
+		try {
+			baseUrl = await shared.readyUrl;
+		} catch (err) {
+			this.cleanupView(paneId);
+			this.emitStatus({
+				paneId,
+				status: "error",
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return {
+				status: "failed",
+				error: err instanceof Error ? err.message : String(err),
+			};
+		}
+		const urlWithFolder = appendFolderParam(baseUrl, worktreePath);
+		view.webContents.loadURL(urlWithFolder);
+		this.emitStatus({ paneId, status: "ready" });
+		return { status: "ready", port: shared.port };
+	}
+
+	private async ensureShared(): Promise<
+		SharedServer | { error: VscodeStartResult }
+	> {
+		if (this.shared) return this.shared;
+		if (this.sharedPending) return this.sharedPending;
+
+		const launch = async (): Promise<
+			SharedServer | { error: VscodeStartResult }
+		> => {
+			const isAvailable =
+				this.deps.isCodeCliAvailable ?? defaultIsCodeCliAvailable;
+			if (!(await isAvailable())) {
+				return { error: { status: "cli-missing" } };
+			}
+
+			const preferred = this.deps.preferredPort;
+			const findPort = this.deps.findFreePort ?? defaultFindFreePort;
+			const port =
+				preferred !== undefined && (await isPortAvailable(preferred))
+					? preferred
+					: await findPort();
+
+			const server =
+				this.deps.createServer?.(port) ??
+				new VscodeServer({
+					command: "code",
+					// Unused by the CLI; `appendFolderParam()` drives per-pane
+					// folder selection via the web UI query string.
+					worktreePath: "",
+					port,
+					env: await getProcessEnvWithShellPath(),
+					serverDataDir: this.deps.serverDataDir,
+				});
+
+			let ready = false;
+			const readyUrl = new Promise<string>((resolve, reject) => {
+				server.once("ready", (info: { url: string }) => {
+					ready = true;
+					resolve(info.url);
+				});
+				server.on(
+					"exit",
+					(info: {
+						code: number | null;
+						signal: NodeJS.Signals | null;
+						outputTail?: string;
+					}) => {
+						this.shared = null;
+						const tail = info.outputTail?.trim();
+						const detail = `code=${info.code ?? "null"}${tail ? `\n${tail}` : ""}`;
+						// Surface the exit to every currently-attached pane so the
+						// renderer drops back to the "failed" phase, not a half-
+						// loaded view pointing at a dead server.
+						for (const paneId of this.entries.keys()) {
+							this.emitStatus({
+								paneId,
+								status: "exited",
+								error: `exited (${detail})`,
+							});
+						}
+						if (!ready) {
+							reject(new Error(`child exited before ready (${detail})`));
+						}
+					},
+				);
+				server.on("stderr", (chunk: string) => {
+					console.warn("[vscode:shared] stderr:", chunk.trimEnd());
+				});
+				server.on("stdout", (chunk: string) => {
+					console.log("[vscode:shared] stdout:", chunk.trimEnd());
+				});
+				void server.start();
+			});
+			// Prevent unhandled-rejection warnings when no pane is waiting on
+			// readyUrl at the moment the server exits (e.g. after all panes
+			// closed but before the next `start()` awaits it).
+			readyUrl.catch(() => {});
+
+			const shared: SharedServer = { server, port, readyUrl };
+			this.shared = shared;
+			return shared;
+		};
+
+		this.sharedPending = launch();
+		try {
+			return await this.sharedPending;
+		} finally {
+			this.sharedPending = null;
+		}
 	}
 
 	setBounds(paneId: string, bounds: VscodeBounds): void {
@@ -213,7 +316,6 @@ export class VscodeManager extends EventEmitter {
 	focus(paneId: string): void {
 		const entry = this.entries.get(paneId);
 		if (!entry) return;
-		if (!entry.ready) return;
 		try {
 			entry.view.webContents.focus();
 		} catch {
@@ -222,20 +324,24 @@ export class VscodeManager extends EventEmitter {
 	}
 
 	stop(paneId: string): void {
-		this.cleanup(paneId);
+		this.cleanupView(paneId);
+		if (this.entries.size === 0) {
+			this.stopSharedServer();
+		}
 	}
 
 	stopAll(): void {
 		for (const paneId of [...this.entries.keys()]) {
-			this.cleanup(paneId);
+			this.cleanupView(paneId);
 		}
+		this.stopSharedServer();
 	}
 
 	has(paneId: string): boolean {
 		return this.entries.has(paneId);
 	}
 
-	private cleanup(paneId: string): void {
+	private cleanupView(paneId: string): void {
 		const entry = this.entries.get(paneId);
 		if (!entry) return;
 		this.entries.delete(paneId);
@@ -252,15 +358,25 @@ export class VscodeManager extends EventEmitter {
 		} catch {
 			// webContents may already be destroyed
 		}
+	}
+
+	private stopSharedServer(): void {
+		if (!this.shared) return;
 		try {
-			entry.server.stop();
+			this.shared.server.stop();
 		} catch {
 			// process may already be gone
 		}
+		this.shared = null;
 	}
 
 	private emitStatus(event: VscodeStatusEvent): void {
 		this.emit("status", event);
 		this.emit(`status:${event.paneId}`, event);
+	}
+
+	private emitFocus(event: VscodeFocusEvent): void {
+		this.emit("focus", event);
+		this.emit(`focus:${event.paneId}`, event);
 	}
 }

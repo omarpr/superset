@@ -24,6 +24,7 @@ interface FakeView {
 		loadURL: ReturnType<typeof mock>;
 		close: ReturnType<typeof mock>;
 		focus: ReturnType<typeof mock>;
+		on: ReturnType<typeof mock>;
 	};
 	setBounds: ReturnType<typeof mock>;
 	setVisible: ReturnType<typeof mock>;
@@ -36,6 +37,7 @@ function makeFakeView(): FakeView {
 			loadURL: mock(() => {}),
 			close: mock(() => {}),
 			focus: mock(() => {}),
+			on: mock(() => {}),
 		},
 		setBounds: mock(() => {}),
 		setVisible: mock(() => {}),
@@ -52,11 +54,17 @@ function makeManager(overrides: Partial<VscodeManagerDeps> = {}) {
 		isDestroyed: () => false,
 	};
 	const views: FakeView[] = [];
+	const servers: FakeServer[] = [];
 	const deps: VscodeManagerDeps = {
 		getWindow: () => window as never,
 		findFreePort: async () => 40000,
+		// Tests leave preferredPort unset so the manager skips real TCP probing.
 		isCodeCliAvailable: async () => true,
-		createServer: (port) => new FakeServer(port) as never,
+		createServer: (port) => {
+			const s = new FakeServer(port);
+			servers.push(s);
+			return s as never;
+		},
 		createView: () => {
 			const v = makeFakeView();
 			views.push(v);
@@ -64,18 +72,19 @@ function makeManager(overrides: Partial<VscodeManagerDeps> = {}) {
 		},
 		...overrides,
 	};
-	return { manager: new VscodeManager(deps), window, deps, views };
+	return { manager: new VscodeManager(deps), window, deps, views, servers };
 }
 
 describe("VscodeManager", () => {
-	it("start() spawns a server and attaches a hidden view", async () => {
-		const { manager, window } = makeManager();
+	it("start() spawns the shared server and attaches a hidden view", async () => {
+		const { manager, window, servers } = makeManager();
 		const result = await manager.start({
 			paneId: "p1",
 			worktreePath: "/tmp/repo",
 		});
 		expect(result.status).toBe("ready");
 		expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
+		expect(servers.length).toBe(1);
 	});
 
 	it("start() is idempotent for the same paneId", async () => {
@@ -85,11 +94,46 @@ describe("VscodeManager", () => {
 		expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
 	});
 
-	it("stop() removes the view and kills the server", async () => {
-		const { manager, window } = makeManager();
-		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+	it("reuses a single server across panes and loads per-pane ?folder= URLs", async () => {
+		const { manager, window, servers, views } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/one" });
+		await manager.start({ paneId: "p2", worktreePath: "/tmp/two" });
+		expect(servers.length).toBe(1);
+		expect(window.contentView.addChildView).toHaveBeenCalledTimes(2);
+		const urls = views.map(
+			(v) => v.webContents.loadURL.mock.calls.at(0)?.[0] as string,
+		);
+		expect(urls[0]).toContain("folder=%2Ftmp%2Fone");
+		expect(urls[1]).toContain("folder=%2Ftmp%2Ftwo");
+		// Shared origin is the same across panes — this is what makes
+		// IndexedDB / localStorage settings persist across panes.
+		const origin = (u: string) => new URL(u).origin;
+		expect(origin(urls[0])).toBe(origin(urls[1]));
+	});
+
+	it("stop() removes the view and keeps the server alive while other panes remain", async () => {
+		const { manager, window, servers } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/one" });
+		await manager.start({ paneId: "p2", worktreePath: "/tmp/two" });
 		manager.stop("p1");
 		expect(window.contentView.removeChildView).toHaveBeenCalledTimes(1);
+		expect(servers[0]?.stopped).toBe(false);
+	});
+
+	it("stop() on the last pane also stops the shared server", async () => {
+		const { manager, servers } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		manager.stop("p1");
+		expect(servers[0]?.stopped).toBe(true);
+	});
+
+	it("stopAll() removes all views and stops the shared server", async () => {
+		const { manager, window, servers } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/one" });
+		await manager.start({ paneId: "p2", worktreePath: "/tmp/two" });
+		manager.stopAll();
+		expect(window.contentView.removeChildView).toHaveBeenCalledTimes(2);
+		expect(servers[0]?.stopped).toBe(true);
 	});
 
 	it("start() resolves with status 'cli-missing' when the binary is absent", async () => {
@@ -112,37 +156,5 @@ describe("VscodeManager", () => {
 		const { manager, views } = makeManager();
 		manager.focus("unknown");
 		expect(views.length).toBe(0);
-	});
-
-	it("focus() is a no-op for a pane that has started but is not yet ready", async () => {
-		// A server that never emits "ready" or "exit", so doStart() hangs.
-		const hangServer = () => {
-			const s = new EventEmitter();
-			(s as unknown as { start: () => Promise<void> }).start = () =>
-				new Promise(() => {
-					// never resolves — server never emits "ready" or "exit"
-				});
-			(s as unknown as { stop: () => void }).stop = () => {};
-			return s;
-		};
-		const { manager, views } = makeManager({
-			createServer: hangServer as never,
-		});
-
-		// start() will hang because the server never emits ready/exit.
-		// doStart() sets entries before awaiting, so after one macro-task tick
-		// the entry exists with ready: false.
-		const startPromise = manager.start({
-			paneId: "p1",
-			worktreePath: "/tmp/repo",
-		});
-		await new Promise<void>((r) => setTimeout(r, 0));
-
-		manager.focus("p1");
-		expect(views[0]?.webContents.focus).not.toHaveBeenCalled();
-
-		// Tear down without awaiting the hanging promise.
-		manager.stop("p1");
-		void startPromise;
 	});
 });

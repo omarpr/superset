@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useTabsStore } from "renderer/stores/tabs/store";
+import { useVscodeFocusStore } from "renderer/stores/vscode-focus";
 import { reconcileOverlay } from "./reconcileOverlay";
 
 export type VscodePhase =
@@ -90,15 +91,15 @@ export function useEmbeddedVscode({
 		// WebContentsView is a native OS-level view composited above all HTML in
 		// the window, so no CSS z-index can put overlays on top of it. Hide the
 		// view whenever a blocking Radix / cmdk / sonner overlay is open and
-		// visually intersects the pane rect. Tooltips are included too, but
-		// hiding-due-to-tooltip-only uses a longer debounce so cursor-transit
-		// flashes don't flicker the native view.
+		// visually intersects the pane rect. Tooltips are intentionally NOT in
+		// the selector: hiding the view swaps to the BrowserWindow background
+		// color, which flashes the entire IDE black on every tooltip hover.
+		// Clipping behind a small tooltip is a better UX than a full repaint.
 		let currentVisible = false;
 		let pendingVisible: boolean | null = null;
 		let flushTimer: number | null = null;
 		let rafHandle: number | null = null;
 		const HIDE_DEBOUNCE_MS = 16;
-		const TOOLTIP_HIDE_DEBOUNCE_MS = 100;
 		const flush = () => {
 			flushTimer = null;
 			if (pendingVisible === null || pendingVisible === currentVisible) return;
@@ -113,35 +114,23 @@ export function useEmbeddedVscode({
 			flushTimer = window.setTimeout(flush, delayMs);
 		};
 		// Broad selector: Radix poppers (dropdowns/popovers/menus/selects),
-		// open dialogs, cmdk command menus, sonner toast items, and tooltips
-		// (handled with a longer hide delay below).
+		// open dialogs, cmdk command menus, sonner toast items.
 		const OVERLAY_SELECTOR = [
 			"[data-radix-popper-content-wrapper]",
 			'[role="dialog"][data-state="open"]',
-			'[role="tooltip"]',
 			"[cmdk-root]",
 			"[data-sonner-toast]",
 		].join(", ");
-		const isTooltipOverlay = (overlay: HTMLElement): boolean =>
-			overlay.matches('[role="tooltip"]') ||
-			overlay.querySelector('[role="tooltip"]') !== null;
 		const reconcile = () => {
 			const paneRect = el.getBoundingClientRect();
 			const overlayEls =
 				document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
 			const overlays = Array.from(overlayEls, (overlay) => ({
 				rect: overlay.getBoundingClientRect(),
-				isTooltip: isTooltipOverlay(overlay),
+				isTooltip: false,
 			}));
 			const result = reconcileOverlay({ paneRect, overlays });
-			if (!result.visible) {
-				scheduleVisible(
-					false,
-					result.tooltipOnly ? TOOLTIP_HIDE_DEBOUNCE_MS : HIDE_DEBOUNCE_MS,
-				);
-			} else {
-				scheduleVisible(true, HIDE_DEBOUNCE_MS);
-			}
+			scheduleVisible(result.visible, HIDE_DEBOUNCE_MS);
 		};
 		// Two-pass reconcile: run immediately, then again after the next layout
 		// frame. Radix poppers emit multiple style mutations while positioning;
@@ -200,6 +189,26 @@ export function useEmbeddedVscode({
 		if (!isPaneFocused) return;
 		focusMutation.mutate({ paneId });
 	}, [paneId, phase, isPaneFocused, focusMutation.mutate]);
+
+	// Mirror the WebContentsView's OS-level focus into renderer state. The
+	// tabs-store `setFocusedPane` handles mosaic focus (so pane-switch hotkeys
+	// target the right pane); `useVscodeFocusStore` is read by `useHotkey` to
+	// gate Superset shortcuts while the IDE owns keyboard input.
+	const setFocusedPane = useTabsStore((s) => s.setFocusedPane);
+	const setVscodeFocused = useVscodeFocusStore((s) => s.setFocused);
+	const clearVscodeFocused = useVscodeFocusStore((s) => s.clearPane);
+	electronTrpc.vscode.onFocus.useSubscription(undefined, {
+		onData: (event) => {
+			if (event.paneId !== paneId) return;
+			setVscodeFocused(paneId, event.focused);
+			if (event.focused) setFocusedPane(tabId, paneId);
+		},
+	});
+	useEffect(() => {
+		return () => {
+			clearVscodeFocused(paneId);
+		};
+	}, [paneId, clearVscodeFocused]);
 
 	return { containerRef, phase, errorMessage };
 }
