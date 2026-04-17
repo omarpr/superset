@@ -113,4 +113,36 @@ describe("VscodeManager", () => {
 		manager.focus("unknown");
 		expect(views.length).toBe(0);
 	});
+
+	it("focus() is a no-op for a pane that has started but is not yet ready", async () => {
+		// A server that never emits "ready" or "exit", so doStart() hangs.
+		const hangServer = () => {
+			const s = new EventEmitter();
+			(s as unknown as { start: () => Promise<void> }).start = () =>
+				new Promise(() => {
+					// never resolves — server never emits "ready" or "exit"
+				});
+			(s as unknown as { stop: () => void }).stop = () => {};
+			return s;
+		};
+		const { manager, views } = makeManager({
+			createServer: hangServer as never,
+		});
+
+		// start() will hang because the server never emits ready/exit.
+		// doStart() sets entries before awaiting, so after one macro-task tick
+		// the entry exists with ready: false.
+		const startPromise = manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		await new Promise<void>((r) => setTimeout(r, 0));
+
+		manager.focus("p1");
+		expect(views[0]?.webContents.focus).not.toHaveBeenCalled();
+
+		// Tear down without awaiting the hanging promise.
+		manager.stop("p1");
+		void startPromise;
+	});
 });

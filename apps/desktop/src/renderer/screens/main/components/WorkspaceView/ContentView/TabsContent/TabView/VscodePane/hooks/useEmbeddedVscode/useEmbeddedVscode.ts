@@ -160,28 +160,14 @@ export function useEmbeddedVscode({
 			attributeFilter: ["data-state"],
 		});
 
-		// Forward OS-level keyboard focus to the embedded webContents.
-		// Without this, the main window's document-level keydown listeners
-		// (react-hotkeys-hook) keep firing and swallow VS Code shortcuts.
-		const requestFocus = () => focusMutation.mutate({ paneId });
-		requestFocus();
-		el.addEventListener("focus", requestFocus, true);
-
 		return () => {
 			ro.disconnect();
 			mo.disconnect();
 			if (flushTimer !== null) window.clearTimeout(flushTimer);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
-			el.removeEventListener("focus", requestFocus, true);
 		};
-	}, [
-		paneId,
-		phase,
-		setBoundsMutation.mutate,
-		setVisibleMutation.mutate,
-		focusMutation.mutate,
-	]);
+	}, [paneId, phase, setBoundsMutation.mutate, setVisibleMutation.mutate]);
 
 	// Whenever the mosaic marks this pane as focused (e.g. via a click on the
 	// pane chrome or a keyboard pane-switch), hand keyboard focus back to the
