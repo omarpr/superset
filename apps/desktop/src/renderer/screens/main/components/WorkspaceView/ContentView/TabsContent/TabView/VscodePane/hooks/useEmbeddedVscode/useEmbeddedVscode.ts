@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useTabsStore } from "renderer/stores/tabs/store";
+import { reconcileOverlay } from "./reconcileOverlay";
 
 export type VscodePhase =
 	| "idle"
@@ -88,71 +89,92 @@ export function useEmbeddedVscode({
 
 		// WebContentsView is a native OS-level view composited above all HTML in
 		// the window, so no CSS z-index can put overlays on top of it. Hide the
-		// view whenever a blocking Radix overlay (dropdown/popover/menu/dialog)
-		// is open and visually intersects the pane rect. Tooltips are excluded:
-		// they're small and hover-triggered, so toggling visibility on them
-		// causes visible flicker as the mouse moves across UI chrome.
+		// view whenever a blocking Radix / cmdk / sonner overlay is open and
+		// visually intersects the pane rect. Tooltips are included too, but
+		// hiding-due-to-tooltip-only uses a longer debounce so cursor-transit
+		// flashes don't flicker the native view.
 		let currentVisible = false;
 		let pendingVisible: boolean | null = null;
 		let flushTimer: number | null = null;
+		let rafHandle: number | null = null;
+		const HIDE_DEBOUNCE_MS = 16;
+		const TOOLTIP_HIDE_DEBOUNCE_MS = 100;
 		const flush = () => {
 			flushTimer = null;
 			if (pendingVisible === null || pendingVisible === currentVisible) return;
 			currentVisible = pendingVisible;
 			setVisibleMutation.mutate({ paneId, visible: currentVisible });
 		};
-		const scheduleVisible = (visible: boolean) => {
+		const scheduleVisible = (visible: boolean, delayMs: number) => {
 			pendingVisible = visible;
 			if (flushTimer !== null) return;
 			// Coalesce bursts of mutations (e.g. popper position/style updates)
 			// into a single IPC call on the next tick.
-			flushTimer = window.setTimeout(flush, 16);
+			flushTimer = window.setTimeout(flush, delayMs);
 		};
-		const OVERLAY_SELECTOR =
-			'[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]';
-		const rectsIntersect = (a: DOMRect, b: DOMRect) =>
-			a.right > b.left &&
-			a.left < b.right &&
-			a.bottom > b.top &&
-			a.top < b.bottom;
-		const isBlockingOverlay = (overlay: HTMLElement): boolean => {
-			// Radix tooltip content carries role="tooltip" — skip it.
-			if (overlay.querySelector('[role="tooltip"]')) return false;
-			return true;
-		};
+		// Broad selector: Radix poppers (dropdowns/popovers/menus/selects),
+		// open dialogs, cmdk command menus, sonner toast items, and tooltips
+		// (handled with a longer hide delay below).
+		const OVERLAY_SELECTOR = [
+			"[data-radix-popper-content-wrapper]",
+			'[role="dialog"][data-state="open"]',
+			'[role="tooltip"]',
+			"[cmdk-root]",
+			"[data-sonner-toast]",
+		].join(", ");
+		const isTooltipOverlay = (overlay: HTMLElement): boolean =>
+			overlay.matches('[role="tooltip"]') ||
+			overlay.querySelector('[role="tooltip"]') !== null;
 		const reconcile = () => {
 			const paneRect = el.getBoundingClientRect();
-			const overlays = document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
-			for (const overlay of overlays) {
-				if (!isBlockingOverlay(overlay)) continue;
-				const r = overlay.getBoundingClientRect();
-				if (r.width === 0 || r.height === 0) continue;
-				if (rectsIntersect(r, paneRect)) {
-					scheduleVisible(false);
-					return;
-				}
+			const overlayEls =
+				document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR);
+			const overlays = Array.from(overlayEls, (overlay) => ({
+				rect: overlay.getBoundingClientRect(),
+				isTooltip: isTooltipOverlay(overlay),
+			}));
+			const result = reconcileOverlay({ paneRect, overlays });
+			if (!result.visible) {
+				scheduleVisible(
+					false,
+					result.tooltipOnly ? TOOLTIP_HIDE_DEBOUNCE_MS : HIDE_DEBOUNCE_MS,
+				);
+			} else {
+				scheduleVisible(true, HIDE_DEBOUNCE_MS);
 			}
-			scheduleVisible(true);
 		};
-		reconcile();
+		// Two-pass reconcile: run immediately, then again after the next layout
+		// frame. Radix poppers emit multiple style mutations while positioning;
+		// the rAF pass catches the FINAL rect after layout/animation settle,
+		// which eliminates the partial-clip bug where the native view hid
+		// before the popper reached its final position.
+		const reconcileTwoPass = () => {
+			reconcile();
+			if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+			rafHandle = requestAnimationFrame(() => {
+				rafHandle = null;
+				reconcile();
+			});
+		};
+		reconcileTwoPass();
 
 		const ro = new ResizeObserver(() => {
 			push();
-			reconcile();
+			reconcileTwoPass();
 		});
 		ro.observe(el);
 		const onResize = () => {
 			push();
-			reconcile();
+			reconcileTwoPass();
 		};
 		const onScroll = () => {
 			push();
-			reconcile();
+			reconcileTwoPass();
 		};
 		window.addEventListener("resize", onResize);
 		window.addEventListener("scroll", onScroll, true);
 
-		const mo = new MutationObserver(reconcile);
+		const mo = new MutationObserver(reconcileTwoPass);
 		mo.observe(document.body, {
 			childList: true,
 			subtree: true,
@@ -164,6 +186,7 @@ export function useEmbeddedVscode({
 			ro.disconnect();
 			mo.disconnect();
 			if (flushTimer !== null) window.clearTimeout(flushTimer);
+			if (rafHandle !== null) cancelAnimationFrame(rafHandle);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
 		};
