@@ -6,17 +6,21 @@ import { isCodeCliAvailable as defaultIsCodeCliAvailable } from "./check-code-cl
 import { findFreePort as defaultFindFreePort } from "./find-free-port";
 import { VscodeServer } from "./vscode-server";
 
-async function createDefaultView(): Promise<WebContentsView> {
+async function createDefaultView(
+	browserSessionDir: string,
+): Promise<WebContentsView> {
 	const electron = await import("electron");
+	// Persistent session backed by an absolute path that doesn't vary by
+	// workspace. `session.fromPartition("persist:vscode")` would inherit
+	// `app.getPath("userData")`, which dev builds override per-workspace via
+	// `app.setName("Superset (<workspace>)")` — isolating IndexedDB/localStorage
+	// across worktrees. A stable disk path keeps user-level VS Code settings,
+	// themes, and UI prefs shared across every pane and every workspace.
+	const vscodeSession = electron.session.fromPath(browserSessionDir);
 	return new electron.WebContentsView({
 		webPreferences: {
 			backgroundThrottling: false,
-			// Persistent partition shared across all VS Code panes so
-			// browser-side state (UI settings, installed extension cache,
-			// theme prefs) survives pane restarts. `code serve-web` only
-			// exposes --server-data-dir for server state; anything the
-			// web UI persists lives in the Electron session storage.
-			partition: "persist:vscode",
+			session: vscodeSession,
 		},
 	});
 }
@@ -51,6 +55,14 @@ export interface VscodeManagerDeps {
 	getWindow: () => BrowserWindow | null;
 	/** Stable on-disk location for `code serve-web` state shared across panes. */
 	serverDataDir?: string;
+	/**
+	 * Absolute path where the embedded VS Code `WebContentsView` persists
+	 * browser-side state (IndexedDB, localStorage, service worker cache).
+	 * Must NOT be derived from `app.getPath("userData")` because dev builds
+	 * override the app name per-workspace, making userData workspace-scoped —
+	 * which would isolate user settings and themes across worktrees.
+	 */
+	browserSessionDir?: string;
 	findFreePort?: () => Promise<number>;
 	isCodeCliAvailable?: () => Promise<boolean>;
 	createServer?: (port: number) => VscodeServer;
@@ -159,7 +171,9 @@ export class VscodeManager extends EventEmitter {
 			return { status: "failed", error: "no-window" };
 		}
 
-		const view = this.deps.createView?.() ?? (await createDefaultView());
+		const view =
+			this.deps.createView?.() ??
+			(await createDefaultView(this.requireBrowserSessionDir()));
 		view.setVisible(false);
 		view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 		window.contentView.addChildView(view);
@@ -323,6 +337,26 @@ export class VscodeManager extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Snapshot the current frame of the embedded webContents as a PNG data
+	 * URL. The renderer paints this as a backing image on the pane container
+	 * right before hiding the native view, so overlays (dropdowns, cmdk,
+	 * dialogs) render over a frozen IDE image instead of the BrowserWindow
+	 * background color flashing through.
+	 */
+	async capture(paneId: string): Promise<string | null> {
+		const entry = this.entries.get(paneId);
+		if (!entry) return null;
+		try {
+			const image = await entry.view.webContents.capturePage();
+			if (image.isEmpty()) return null;
+			return image.toDataURL();
+		} catch {
+			// webContents may be destroyed or mid-navigation
+			return null;
+		}
+	}
+
 	stop(paneId: string): void {
 		this.cleanupView(paneId);
 		if (this.entries.size === 0) {
@@ -378,5 +412,15 @@ export class VscodeManager extends EventEmitter {
 	private emitFocus(event: VscodeFocusEvent): void {
 		this.emit("focus", event);
 		this.emit(`focus:${event.paneId}`, event);
+	}
+
+	private requireBrowserSessionDir(): string {
+		const dir = this.deps.browserSessionDir;
+		if (!dir) {
+			throw new Error(
+				"VscodeManager: browserSessionDir is required when no createView override is provided",
+			);
+		}
+		return dir;
 	}
 }

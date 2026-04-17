@@ -37,6 +37,7 @@ export function useEmbeddedVscode({
 	const setBoundsMutation = electronTrpc.vscode.setBounds.useMutation();
 	const setVisibleMutation = electronTrpc.vscode.setVisible.useMutation();
 	const focusMutation = electronTrpc.vscode.focus.useMutation();
+	const captureMutation = electronTrpc.vscode.capture.useMutation();
 
 	useEffect(() => {
 		let cancelled = false;
@@ -91,20 +92,56 @@ export function useEmbeddedVscode({
 		// WebContentsView is a native OS-level view composited above all HTML in
 		// the window, so no CSS z-index can put overlays on top of it. Hide the
 		// view whenever a blocking Radix / cmdk / sonner overlay is open and
-		// visually intersects the pane rect. Tooltips are intentionally NOT in
-		// the selector: hiding the view swaps to the BrowserWindow background
-		// color, which flashes the entire IDE black on every tooltip hover.
-		// Clipping behind a small tooltip is a better UX than a full repaint.
+		// visually intersects the pane rect. Before each hide we snapshot the
+		// view and paint it as the container's background image so overlays
+		// render over a frozen IDE frame instead of the BrowserWindow bg color
+		// flashing through. Tooltips stay out of the selector: they're
+		// throwaway hover affordances where the capture+hide round-trip would
+		// be heavier than the clipping it prevents.
 		let currentVisible = false;
 		let pendingVisible: boolean | null = null;
 		let flushTimer: number | null = null;
 		let rafHandle: number | null = null;
+		// Monotonic counter so stale async work from superseded flushes
+		// (e.g. a slow capture resolving after a newer show transition) can
+		// short-circuit before mutating DOM or firing IPC.
+		let flushGeneration = 0;
 		const HIDE_DEBOUNCE_MS = 16;
+		const clearBackdrop = () => {
+			el.style.backgroundImage = "";
+			el.style.backgroundSize = "";
+			el.style.backgroundRepeat = "";
+		};
+		const paintBackdrop = (dataUrl: string) => {
+			el.style.backgroundImage = `url("${dataUrl}")`;
+			el.style.backgroundSize = "100% 100%";
+			el.style.backgroundRepeat = "no-repeat";
+		};
 		const flush = () => {
 			flushTimer = null;
 			if (pendingVisible === null || pendingVisible === currentVisible) return;
-			currentVisible = pendingVisible;
-			setVisibleMutation.mutate({ paneId, visible: currentVisible });
+			const myGen = ++flushGeneration;
+			const nextVisible = pendingVisible;
+			currentVisible = nextVisible;
+			if (!nextVisible) {
+				captureMutation
+					.mutateAsync({ paneId })
+					.then((result) => {
+						if (myGen !== flushGeneration) return;
+						if (result?.dataUrl) paintBackdrop(result.dataUrl);
+						setVisibleMutation.mutate({ paneId, visible: false });
+					})
+					.catch(() => {
+						if (myGen !== flushGeneration) return;
+						setVisibleMutation.mutate({ paneId, visible: false });
+					});
+				return;
+			}
+			setVisibleMutation.mutate({ paneId, visible: true });
+			requestAnimationFrame(() => {
+				if (myGen !== flushGeneration) return;
+				clearBackdrop();
+			});
 		};
 		const scheduleVisible = (visible: boolean, delayMs: number) => {
 			pendingVisible = visible;
@@ -178,8 +215,17 @@ export function useEmbeddedVscode({
 			if (rafHandle !== null) cancelAnimationFrame(rafHandle);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
+			// Any in-flight capture resolving after unmount must be ignored.
+			flushGeneration++;
+			clearBackdrop();
 		};
-	}, [paneId, phase, setBoundsMutation.mutate, setVisibleMutation.mutate]);
+	}, [
+		paneId,
+		phase,
+		setBoundsMutation.mutate,
+		setVisibleMutation.mutate,
+		captureMutation.mutateAsync,
+	]);
 
 	// Whenever the mosaic marks this pane as focused (e.g. via a click on the
 	// pane chrome or a keyboard pane-switch), hand keyboard focus back to the

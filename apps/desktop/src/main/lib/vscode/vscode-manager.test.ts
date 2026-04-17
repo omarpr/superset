@@ -19,25 +19,40 @@ class FakeServer extends EventEmitter {
 	}
 }
 
+interface FakeNativeImage {
+	isEmpty: () => boolean;
+	toDataURL: () => string;
+}
+
 interface FakeView {
 	webContents: {
 		loadURL: ReturnType<typeof mock>;
 		close: ReturnType<typeof mock>;
 		focus: ReturnType<typeof mock>;
 		on: ReturnType<typeof mock>;
+		capturePage: ReturnType<typeof mock>;
 	};
 	setBounds: ReturnType<typeof mock>;
 	setVisible: ReturnType<typeof mock>;
 	destroyed: boolean;
 }
 
-function makeFakeView(): FakeView {
+function makeFakeView(
+	captureResult: FakeNativeImage | Error = {
+		isEmpty: () => false,
+		toDataURL: () => "data:image/png;base64,FAKE",
+	},
+): FakeView {
 	return {
 		webContents: {
 			loadURL: mock(() => {}),
 			close: mock(() => {}),
 			focus: mock(() => {}),
 			on: mock(() => {}),
+			capturePage: mock(async () => {
+				if (captureResult instanceof Error) throw captureResult;
+				return captureResult;
+			}),
 		},
 		setBounds: mock(() => {}),
 		setVisible: mock(() => {}),
@@ -156,5 +171,45 @@ describe("VscodeManager", () => {
 		const { manager, views } = makeManager();
 		manager.focus("unknown");
 		expect(views.length).toBe(0);
+	});
+
+	it("capture() returns a data URL from the embedded webContents", async () => {
+		const { manager } = makeManager();
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		const dataUrl = await manager.capture("p1");
+		expect(dataUrl).toBe("data:image/png;base64,FAKE");
+	});
+
+	it("capture() returns null when the captured frame is empty", async () => {
+		const { manager } = makeManager({
+			createView: () => {
+				const v = makeFakeView({
+					isEmpty: () => true,
+					toDataURL: () => "data:image/png;base64,EMPTY",
+				});
+				return v as never;
+			},
+		});
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		const dataUrl = await manager.capture("p1");
+		expect(dataUrl).toBeNull();
+	});
+
+	it("capture() returns null when capturePage throws", async () => {
+		const { manager } = makeManager({
+			createView: () => {
+				const v = makeFakeView(new Error("destroyed"));
+				return v as never;
+			},
+		});
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		const dataUrl = await manager.capture("p1");
+		expect(dataUrl).toBeNull();
+	});
+
+	it("capture() returns null for unknown panes", async () => {
+		const { manager } = makeManager();
+		const dataUrl = await manager.capture("unknown");
+		expect(dataUrl).toBeNull();
 	});
 });

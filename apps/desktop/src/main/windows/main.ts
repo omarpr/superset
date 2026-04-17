@@ -133,14 +133,21 @@ export async function MainWindow() {
 
 	currentWindow = window;
 
-	const vscodeServerDataDir = join(
-		app.getPath("userData"),
-		"vscode-server-data",
-	);
+	// `app.getPath("appData")` is the OS-level app-data parent (e.g.
+	// `~/Library/Application Support/`) and does NOT vary when dev builds
+	// override `app.setName("Superset (<workspace>)")`. Anchoring VS Code's
+	// disk state here keeps server data (extensions, machine settings) and
+	// browser-side state (IndexedDB/localStorage for UI prefs) shared across
+	// every worktree and every app restart.
+	const vscodeSharedRoot = join(app.getPath("appData"), "superset-vscode");
+	const vscodeServerDataDir = join(vscodeSharedRoot, "server-data");
+	const vscodeBrowserSessionDir = join(vscodeSharedRoot, "browser-session");
 	mkdirSync(vscodeServerDataDir, { recursive: true });
+	mkdirSync(vscodeBrowserSessionDir, { recursive: true });
 	const vscodeManager = new VscodeManager({
 		getWindow,
 		serverDataDir: vscodeServerDataDir,
+		browserSessionDir: vscodeBrowserSessionDir,
 		preferredPort: DEFAULT_PREFERRED_VSCODE_PORT,
 	});
 	registerVscodeManager(vscodeManager);

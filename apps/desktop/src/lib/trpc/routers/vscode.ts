@@ -53,6 +53,12 @@ export const createVscodeRouter = (vscodeManager: VscodeManager) => {
 				return { success: true };
 			}),
 
+		capture: publicProcedure
+			.input(z.object({ paneId: z.string().min(1) }))
+			.mutation(async ({ input }) => {
+				return { dataUrl: await vscodeManager.capture(input.paneId) };
+			}),
+
 		stop: publicProcedure
 			.input(z.object({ paneId: z.string().min(1) }))
 			.mutation(({ input }) => {
