@@ -8,12 +8,15 @@ import {
 	SelectValue,
 } from "@superset/ui/select";
 import { Switch } from "@superset/ui/switch";
+import { useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useTabsStore } from "renderer/stores/tabs/store";
 import {
 	isItemVisible,
 	SETTING_ITEM_ID,
 	type SettingItemId,
 } from "../../../utils/settings-search";
+import { VscodeDisableConfirmDialog } from "./components/VscodeDisableConfirmDialog";
 
 interface BehaviorSettingsProps {
 	visibleItems?: SettingItemId[] | null;
@@ -40,6 +43,19 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 		SETTING_ITEM_ID.BEHAVIOR_OPEN_LINKS_IN_APP,
 		visibleItems,
 	);
+	const showVscodeBeta = isItemVisible(
+		SETTING_ITEM_ID.BEHAVIOR_VSCODE_BETA,
+		visibleItems,
+	);
+
+	const [vscodeBetaConfirmOpen, setVscodeBetaConfirmOpen] = useState(false);
+
+	const vscodePanes = useTabsStore((s) =>
+		Object.entries(s.panes)
+			.filter(([, p]) => p.type === "vscode")
+			.map(([id]) => id),
+	);
+	const removePane = useTabsStore((s) => s.removePane);
 
 	const utils = electronTrpc.useUtils();
 
@@ -159,128 +175,204 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 		},
 	);
 
+	const { data: vscodeBetaEnabled, isLoading: isVscodeBetaLoading } =
+		electronTrpc.settings.getVscodeBetaEnabled.useQuery();
+	const setVscodeBetaEnabled =
+		electronTrpc.settings.setVscodeBetaEnabled.useMutation({
+			onMutate: async ({ enabled }) => {
+				await utils.settings.getVscodeBetaEnabled.cancel();
+				const previous = utils.settings.getVscodeBetaEnabled.getData();
+				utils.settings.getVscodeBetaEnabled.setData(undefined, enabled);
+				return { previous };
+			},
+			onError: (_err, _vars, context) => {
+				if (context?.previous !== undefined) {
+					utils.settings.getVscodeBetaEnabled.setData(
+						undefined,
+						context.previous,
+					);
+				}
+			},
+			onSettled: () => {
+				utils.settings.getVscodeBetaEnabled.invalidate();
+			},
+		});
+
+	const handleVscodeBetaToggle = (enabled: boolean) => {
+		if (!enabled && vscodePanes.length > 0) {
+			setVscodeBetaConfirmOpen(true);
+		} else {
+			setVscodeBetaEnabled.mutate({ enabled });
+		}
+	};
+
+	const handleVscodeBetaConfirm = () => {
+		for (const paneId of vscodePanes) {
+			removePane(paneId);
+		}
+		setVscodeBetaEnabled.mutate({ enabled: false });
+		setVscodeBetaConfirmOpen(false);
+	};
+
 	return (
-		<div className="p-6 max-w-4xl w-full">
-			<div className="mb-8">
-				<h2 className="text-xl font-semibold">General</h2>
-				<p className="text-sm text-muted-foreground mt-1">
-					Configure general app preferences
-				</p>
-			</div>
+		<>
+			<div className="p-6 max-w-4xl w-full">
+				<div className="mb-8">
+					<h2 className="text-xl font-semibold">General</h2>
+					<p className="text-sm text-muted-foreground mt-1">
+						Configure general app preferences
+					</p>
+				</div>
 
-			<div className="space-y-6">
-				{showConfirmQuit && (
-					<div className="flex items-center justify-between">
-						<div className="space-y-0.5">
-							<Label htmlFor="confirm-on-quit" className="text-sm font-medium">
-								Confirm before quitting
-							</Label>
-							<p className="text-xs text-muted-foreground">
-								Show a confirmation dialog when quitting the app
-							</p>
+				<div className="space-y-6">
+					{showConfirmQuit && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label
+									htmlFor="confirm-on-quit"
+									className="text-sm font-medium"
+								>
+									Confirm before quitting
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Show a confirmation dialog when quitting the app
+								</p>
+							</div>
+							<Switch
+								id="confirm-on-quit"
+								checked={confirmOnQuit ?? true}
+								onCheckedChange={handleConfirmToggle}
+								disabled={isConfirmLoading || setConfirmOnQuit.isPending}
+							/>
 						</div>
-						<Switch
-							id="confirm-on-quit"
-							checked={confirmOnQuit ?? true}
-							onCheckedChange={handleConfirmToggle}
-							disabled={isConfirmLoading || setConfirmOnQuit.isPending}
-						/>
-					</div>
-				)}
+					)}
 
-				{showFileOpenMode && (
-					<div className="flex items-center justify-between">
-						<div className="space-y-0.5">
-							<Label className="text-sm font-medium">File open mode</Label>
-							<p className="text-xs text-muted-foreground">
-								Choose how files open when no preview pane exists
-							</p>
+					{showVscodeBeta && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label htmlFor="vscode-beta" className="text-sm font-medium">
+									VS Code (Beta)
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Enable the embedded VS Code editor as a tab type. Disable if
+									it causes issues.
+								</p>
+							</div>
+							<Switch
+								id="vscode-beta"
+								checked={vscodeBetaEnabled ?? true}
+								onCheckedChange={handleVscodeBetaToggle}
+								disabled={isVscodeBetaLoading || setVscodeBetaEnabled.isPending}
+							/>
 						</div>
-						<Select
-							value={fileOpenMode ?? "split-pane"}
-							onValueChange={(value) =>
-								setFileOpenMode.mutate({ mode: value as FileOpenMode })
-							}
-							disabled={isFileOpenModeLoading || setFileOpenMode.isPending}
-						>
-							<SelectTrigger className="w-[180px]">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="split-pane">Split pane</SelectItem>
-								<SelectItem value="new-tab">New tab</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-				)}
+					)}
 
-				{showResourceMonitor && (
-					<div className="flex items-center justify-between">
-						<div className="space-y-0.5">
-							<Label htmlFor="resource-monitor" className="text-sm font-medium">
-								Resource monitor
-							</Label>
-							<p className="text-xs text-muted-foreground">
-								Show CPU and memory usage in the top bar
-							</p>
-						</div>
-						<Switch
-							id="resource-monitor"
-							checked={resourceMonitorEnabled ?? false}
-							onCheckedChange={(enabled) =>
-								setShowResourceMonitor.mutate({ enabled })
-							}
-							disabled={
-								isResourceMonitorLoading || setShowResourceMonitor.isPending
-							}
-						/>
-					</div>
-				)}
-
-				{showOpenLinksInApp && (
-					<div className="flex items-center justify-between">
-						<div className="space-y-0.5">
-							<Label
-								htmlFor="open-links-in-app"
-								className="text-sm font-medium"
+					{showFileOpenMode && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label className="text-sm font-medium">File open mode</Label>
+								<p className="text-xs text-muted-foreground">
+									Choose how files open when no preview pane exists
+								</p>
+							</div>
+							<Select
+								value={fileOpenMode ?? "split-pane"}
+								onValueChange={(value) =>
+									setFileOpenMode.mutate({ mode: value as FileOpenMode })
+								}
+								disabled={isFileOpenModeLoading || setFileOpenMode.isPending}
 							>
-								Open links in app browser
-							</Label>
-							<p className="text-xs text-muted-foreground">
-								Open links from chat and terminal in the built-in browser
-								instead of your default browser
-							</p>
+								<SelectTrigger className="w-[180px]">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="split-pane">Split pane</SelectItem>
+									<SelectItem value="new-tab">New tab</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
-						<Switch
-							id="open-links-in-app"
-							checked={openLinksInApp ?? false}
-							onCheckedChange={(enabled) =>
-								setOpenLinksInApp.mutate({ enabled })
-							}
-							disabled={isOpenLinksInAppLoading || setOpenLinksInApp.isPending}
-						/>
-					</div>
-				)}
+					)}
 
-				{false && showTelemetry && (
-					<div className="flex items-center justify-between">
-						<div className="space-y-0.5">
-							<Label htmlFor="telemetry" className="text-sm font-medium">
-								Send anonymous usage data
-							</Label>
-							<p className="text-xs text-muted-foreground">
-								Help improve Superset by sending anonymous usage data
-							</p>
+					{showResourceMonitor && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label
+									htmlFor="resource-monitor"
+									className="text-sm font-medium"
+								>
+									Resource monitor
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Show CPU and memory usage in the top bar
+								</p>
+							</div>
+							<Switch
+								id="resource-monitor"
+								checked={resourceMonitorEnabled ?? false}
+								onCheckedChange={(enabled) =>
+									setShowResourceMonitor.mutate({ enabled })
+								}
+								disabled={
+									isResourceMonitorLoading || setShowResourceMonitor.isPending
+								}
+							/>
 						</div>
-						<Switch
-							id="telemetry"
-							checked={telemetryEnabled ?? true}
-							onCheckedChange={handleTelemetryToggle}
-							disabled={isTelemetryLoading || setTelemetryEnabled.isPending}
-						/>
-					</div>
-				)}
+					)}
+
+					{showOpenLinksInApp && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label
+									htmlFor="open-links-in-app"
+									className="text-sm font-medium"
+								>
+									Open links in app browser
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Open links from chat and terminal in the built-in browser
+									instead of your default browser
+								</p>
+							</div>
+							<Switch
+								id="open-links-in-app"
+								checked={openLinksInApp ?? false}
+								onCheckedChange={(enabled) =>
+									setOpenLinksInApp.mutate({ enabled })
+								}
+								disabled={
+									isOpenLinksInAppLoading || setOpenLinksInApp.isPending
+								}
+							/>
+						</div>
+					)}
+
+					{false && showTelemetry && (
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label htmlFor="telemetry" className="text-sm font-medium">
+									Send anonymous usage data
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Help improve Superset by sending anonymous usage data
+								</p>
+							</div>
+							<Switch
+								id="telemetry"
+								checked={telemetryEnabled ?? true}
+								onCheckedChange={handleTelemetryToggle}
+								disabled={isTelemetryLoading || setTelemetryEnabled.isPending}
+							/>
+						</div>
+					)}
+				</div>
 			</div>
-		</div>
+
+			<VscodeDisableConfirmDialog
+				open={vscodeBetaConfirmOpen}
+				onOpenChange={setVscodeBetaConfirmOpen}
+				onConfirm={handleVscodeBetaConfirm}
+				vscodePaneCount={vscodePanes.length}
+			/>
+		</>
 	);
 }

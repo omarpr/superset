@@ -32,6 +32,7 @@ import {
 	DEFAULT_SHOW_RESOURCE_MONITOR,
 	DEFAULT_TERMINAL_LINK_BEHAVIOR,
 	DEFAULT_USE_COMPACT_TERMINAL_ADD_BUTTON,
+	DEFAULT_VSCODE_BETA_ENABLED,
 } from "shared/constants";
 import { normalizePresetProjectIds } from "shared/preset-project-targeting";
 import {
@@ -589,6 +590,26 @@ export const createSettingsRouter = () => {
 					.onConflictDoUpdate({
 						target: settings.id,
 						set: { confirmOnQuit: input.enabled },
+					})
+					.run();
+
+				return { success: true };
+			}),
+
+		getVscodeBetaEnabled: publicProcedure.query(() => {
+			const row = getSettings();
+			return row.vscodeBetaEnabled ?? DEFAULT_VSCODE_BETA_ENABLED;
+		}),
+
+		setVscodeBetaEnabled: publicProcedure
+			.input(z.object({ enabled: z.boolean() }))
+			.mutation(({ input }) => {
+				localDb
+					.insert(settings)
+					.values({ id: 1, vscodeBetaEnabled: input.enabled })
+					.onConflictDoUpdate({
+						target: settings.id,
+						set: { vscodeBetaEnabled: input.enabled },
 					})
 					.run();
 

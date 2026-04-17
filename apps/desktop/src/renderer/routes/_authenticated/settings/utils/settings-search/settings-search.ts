@@ -26,6 +26,7 @@ export const SETTING_ITEM_ID = {
 	BEHAVIOR_FILE_OPEN_MODE: "behavior-file-open-mode",
 	BEHAVIOR_RESOURCE_MONITOR: "behavior-resource-monitor",
 	BEHAVIOR_OPEN_LINKS_IN_APP: "behavior-open-links-in-app",
+	BEHAVIOR_VSCODE_BETA: "behavior-vscode-beta",
 
 	GIT_BRANCH_PREFIX: "git-branch-prefix",
 	GIT_DELETE_LOCAL_BRANCH: "git-delete-local-branch",
@@ -470,6 +471,24 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 			"storage",
 			"base",
 			"default",
+		],
+	},
+	{
+		id: SETTING_ITEM_ID.BEHAVIOR_VSCODE_BETA,
+		section: "behavior",
+		title: "VS Code (Beta)",
+		description:
+			"Enable the embedded VS Code editor as a tab type. Disable if it causes issues.",
+		keywords: [
+			"vscode",
+			"vs code",
+			"visual studio code",
+			"editor",
+			"ide",
+			"beta",
+			"experimental",
+			"code",
+			"tab",
 		],
 	},
 	{

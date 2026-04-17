@@ -42,6 +42,7 @@ export const DEFAULT_TERMINAL_SCROLLBACK = 5000;
 
 // Default user preference values
 export const DEFAULT_CONFIRM_ON_QUIT = true;
+export const DEFAULT_VSCODE_BETA_ENABLED = true;
 export const DEFAULT_TERMINAL_LINK_BEHAVIOR = "file-viewer" as const;
 export const DEFAULT_FILE_OPEN_MODE = "split-pane" as const;
 export const DEFAULT_AUTO_APPLY_DEFAULT_PRESET = true;

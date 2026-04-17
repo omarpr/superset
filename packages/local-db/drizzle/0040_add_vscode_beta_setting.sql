@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `vscode_beta_enabled` integer;
