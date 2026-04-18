@@ -153,6 +153,16 @@ mock.module("electron", () => ({
 		webContents: {
 			loadURL: mock(() => {}),
 			close: mock(() => {}),
+			// VscodeManager attaches focus/blur listeners and calls focus()
+			// + capturePage() on the real WebContentsView.webContents — the
+			// global fallback mock needs these to avoid TypeError when any
+			// test instantiates VscodeManager without a createView override.
+			on: mock(() => {}),
+			focus: mock(() => {}),
+			capturePage: mock(async () => ({
+				isEmpty: () => false,
+				toDataURL: () => "data:image/png;base64,FAKE",
+			})),
 		},
 		setBounds: mock(() => {}),
 		setVisible: mock(() => {}),
