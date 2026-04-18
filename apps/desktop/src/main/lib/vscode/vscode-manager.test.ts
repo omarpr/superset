@@ -213,6 +213,117 @@ describe("VscodeManager", () => {
 		expect(dataUrl).toBeNull();
 	});
 
+	it("returns failed when loadURL rejects", async () => {
+		// Electron's webContents.loadURL returns a Promise that rejects on
+		// did-fail-load. Without awaiting, we'd emit 'ready' for a dead view
+		// and leak an unhandled rejection.
+		const { manager } = makeManager({
+			createView: () => {
+				const v = makeFakeView();
+				v.webContents.loadURL = mock(async () => {
+					throw new Error("ERR_CONNECTION_REFUSED");
+				});
+				return v as never;
+			},
+		});
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("failed");
+		expect(result.error).toBe("ERR_CONNECTION_REFUSED");
+		expect(manager.has("p1")).toBe(false);
+	});
+
+	it("converts ensureShared exceptions into a failed result", async () => {
+		// isCodeCliAvailable, port probing, and env resolution can reject.
+		// start() should surface those as VscodeStartResult, not propagate
+		// the rejection to the caller.
+		const { manager } = makeManager({
+			isCodeCliAvailable: async () => {
+				throw new Error("cli check crashed");
+			},
+		});
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("failed");
+		expect(result.error).toBe("cli check crashed");
+	});
+
+	it("start() after shared exit restarts instead of returning stale ready", async () => {
+		// If the shared server dies while a pane entry is still cached, a
+		// follow-up start() for the same paneId must spin up a fresh server
+		// rather than return `ready` with `port: undefined`.
+		let serverIndex = 0;
+		const servers: FakeServer[] = [];
+		const { manager, window } = makeManager({
+			createServer: (port) => {
+				const s = new FakeServer(port);
+				servers.push(s);
+				serverIndex++;
+				return s as never;
+			},
+		});
+		await manager.start({ paneId: "p1", worktreePath: "/tmp/repo" });
+		// Simulate the shared server exiting mid-session.
+		servers[0]?.emit("exit", {
+			code: 1,
+			signal: null,
+			outputTail: "boom",
+		});
+		await new Promise((r) => setTimeout(r, 0));
+
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("ready");
+		expect(serverIndex).toBe(2);
+		// Stale view got cleaned up; new one attached.
+		expect(window.contentView.addChildView).toHaveBeenCalledTimes(2);
+		expect(window.contentView.removeChildView).toHaveBeenCalledTimes(1);
+	});
+
+	it("stop() during in-flight start bails out without attaching a view", async () => {
+		// stop() bumps a generation counter that doStart() re-checks after
+		// each await. If the pane was closed mid-boot, we must not attach a
+		// WebContentsView for a tab that no longer exists.
+		let releaseReady: (() => void) | null = null;
+		class SlowServer extends EventEmitter {
+			constructor(public readonly port: number) {
+				super();
+			}
+			async start() {
+				releaseReady = () => {
+					this.emit("ready", { url: `http://127.0.0.1:${this.port}/` });
+				};
+			}
+			stop() {}
+		}
+		const { manager, window } = makeManager({
+			createServer: (port) => new SlowServer(port) as never,
+		});
+		const startPromise = manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		// Let doStart() reach `await shared.readyUrl` before we stop.
+		await new Promise((r) => setTimeout(r, 0));
+		manager.stop("p1");
+		releaseReady?.();
+		const result = await startPromise;
+		expect(result.status).toBe("failed");
+		expect(result.error).toBe("cancelled");
+		// stop() ran cleanupView on the entry attached before readyUrl
+		// resolved; cancellation prevents any further addChildView.
+		expect(manager.has("p1")).toBe(false);
+		// addChildView fires once before the await, then stop() fires
+		// removeChildView. No extra attach after cancellation.
+		expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
+	});
+
 	it("retries doStart when the captured shared server dies mid-start", async () => {
 		// First server exits before emitting 'ready'; the second spins up
 		// cleanly. A pane that captured the stale reference must still land

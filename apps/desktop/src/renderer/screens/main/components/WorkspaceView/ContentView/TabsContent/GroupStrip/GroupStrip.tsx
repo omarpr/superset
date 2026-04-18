@@ -61,7 +61,7 @@ export function GroupStrip() {
 	const tabsTrackRef = useRef<HTMLDivElement>(null);
 	const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
 	const utils = electronTrpc.useUtils();
-	const { data: vscodeBetaEnabled } =
+	const { data: vscodeBetaEnabled, isLoading: isVscodeBetaLoading } =
 		electronTrpc.settings.getVscodeBetaEnabled.useQuery();
 	const { data: showPresetsBar } =
 		electronTrpc.settings.getShowPresetsBar.useQuery();
@@ -121,18 +121,18 @@ export function GroupStrip() {
 	// `code serve-web` exposes one VS Code UI per `?folder=<worktreePath>` query
 	// and that UI's state (open editors, cursor, layout) is stored per-origin
 	// in IndexedDB. A second pane loading the same folder would fight over the
-	// same IDB bucket. Block the "add VS Code" path whenever any tab in this
-	// workspace already has a vscode pane.
+	// same IDB bucket. Keyed by worktree path (not workspace tab membership)
+	// because two workspace entries can share a worktree, and IndexedDB
+	// buckets are global to the app — not scoped per workspace.
+	const activeWorktreePath = workspace?.worktreePath;
 	const vscodeAlreadyOpen = useMemo(() => {
-		if (!activeWorkspaceId) return false;
-		const workspaceTabIds = new Set(tabs.map((t) => t.id));
-		for (const pane of Object.values(panes)) {
-			if (pane.type === "vscode" && workspaceTabIds.has(pane.tabId)) {
-				return true;
-			}
-		}
-		return false;
-	}, [activeWorkspaceId, panes, tabs]);
+		if (!activeWorktreePath) return false;
+		return Object.values(panes).some(
+			(pane) =>
+				pane.type === "vscode" &&
+				pane.vscode?.worktreePath === activeWorktreePath,
+		);
+	}, [activeWorktreePath, panes]);
 
 	const activeTabId = useMemo(() => {
 		if (!activeWorkspaceId) return null;
@@ -252,7 +252,11 @@ export function GroupStrip() {
 	};
 
 	const handleAddVscode = () => {
-		if (vscodeBetaEnabled === false) return;
+		// Beta setting is tri-state while the query is in flight — block the
+		// spawn until it resolves to an explicit `true`. Treating `undefined`
+		// as enabled lets a previously-disabled user click in the loading gap
+		// and spin up a VS Code pane they'd turned off.
+		if (vscodeBetaEnabled !== true) return;
 		if (!activeWorkspaceId) return;
 		if (!workspace?.worktreePath) return;
 		if (vscodeAlreadyOpen) return;
@@ -353,11 +357,15 @@ export function GroupStrip() {
 			onAddBrowser={handleAddBrowser}
 			onAddVscode={handleAddVscode}
 			showVscode={vscodeBetaEnabled !== false}
-			vscodeDisabled={vscodeAlreadyOpen}
+			vscodeDisabled={
+				isVscodeBetaLoading || vscodeBetaEnabled !== true || vscodeAlreadyOpen
+			}
 			vscodeDisabledReason={
-				vscodeAlreadyOpen
-					? "VS Code is already open in this workspace"
-					: undefined
+				isVscodeBetaLoading || vscodeBetaEnabled !== true
+					? "Checking VS Code setting"
+					: vscodeAlreadyOpen
+						? "VS Code is already open in this workspace"
+						: undefined
 			}
 			onOpenPreset={handleOpenPreset}
 			onConfigurePresets={handleOpenPresetsSettings}

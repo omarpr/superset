@@ -155,6 +155,10 @@ async function waitForPortAvailable(
 export class VscodeManager extends EventEmitter {
 	private readonly entries = new Map<string, Entry>();
 	private readonly pending = new Map<string, Promise<VscodeStartResult>>();
+	// Monotonic counter per pane. start() captures the current value; stop()
+	// bumps it so any in-flight doStart() can detect that its pane was closed
+	// before it reaches `addChildView`/`loadURL` and bail out cleanly.
+	private readonly startGen = new Map<string, number>();
 	private shared: SharedServer | null = null;
 	private sharedPending: Promise<
 		SharedServer | { error: VscodeStartResult }
@@ -170,13 +174,21 @@ export class VscodeManager extends EventEmitter {
 	}): Promise<VscodeStartResult> {
 		const { paneId, worktreePath } = args;
 		const existing = this.entries.get(paneId);
+		if (existing && this.shared) {
+			return { status: "ready", port: this.shared.port };
+		}
 		if (existing) {
-			return { status: "ready", port: this.shared?.port };
+			// Shared server exited (exit handler cleared `this.shared`) but the
+			// entry survived. Returning "ready" here would hand back a dead
+			// WebContentsView; drop it and fall through to a fresh doStart().
+			this.cleanupView(paneId);
 		}
 		const inflight = this.pending.get(paneId);
 		if (inflight) return inflight;
 
-		const promise = this.doStart(paneId, worktreePath);
+		const gen = (this.startGen.get(paneId) ?? 0) + 1;
+		this.startGen.set(paneId, gen);
+		const promise = this.doStart(paneId, worktreePath, gen);
 		this.pending.set(paneId, promise);
 		try {
 			return await promise;
@@ -185,9 +197,14 @@ export class VscodeManager extends EventEmitter {
 		}
 	}
 
+	private isCancelled(paneId: string, gen: number): boolean {
+		return this.startGen.get(paneId) !== gen;
+	}
+
 	private async doStart(
 		paneId: string,
 		worktreePath: string,
+		gen: number,
 	): Promise<VscodeStartResult> {
 		// One retry is enough to cover the "stale shared" race: the exit
 		// handler clears `this.shared`, but a doStart() already mid-flight
@@ -199,9 +216,23 @@ export class VscodeManager extends EventEmitter {
 		const MAX_ATTEMPTS = 2;
 		let lastError: unknown;
 		for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-			const sharedOrError = await this.ensureShared();
+			let sharedOrError: SharedServer | { error: VscodeStartResult };
+			try {
+				sharedOrError = await this.ensureShared();
+			} catch (err) {
+				// ensureShared() can reject from isCodeCliAvailable, orphan
+				// reclaim, port probing, env resolution, or server construction.
+				// Convert into the declared VscodeStartResult shape instead of
+				// letting the rejection surface from start().
+				const error = err instanceof Error ? err.message : String(err);
+				this.emitStatus({ paneId, status: "error", error });
+				return { status: "failed", error };
+			}
 			if ("error" in sharedOrError) return sharedOrError.error;
 			const shared = sharedOrError;
+			if (this.isCancelled(paneId, gen)) {
+				return { status: "failed", error: "cancelled" };
+			}
 
 			const window = this.deps.getWindow();
 			if (!window || window.isDestroyed()) {
@@ -211,6 +242,14 @@ export class VscodeManager extends EventEmitter {
 			const view =
 				this.deps.createView?.() ??
 				(await createDefaultView(this.requireBrowserSessionDir()));
+			if (this.isCancelled(paneId, gen)) {
+				try {
+					view.webContents.close();
+				} catch {
+					// webContents may already be destroyed
+				}
+				return { status: "failed", error: "cancelled" };
+			}
 			view.setVisible(false);
 			view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 			window.contentView.addChildView(view);
@@ -251,8 +290,25 @@ export class VscodeManager extends EventEmitter {
 					error: err instanceof Error ? err.message : String(err),
 				};
 			}
+			if (this.isCancelled(paneId, gen)) {
+				this.cleanupView(paneId);
+				return { status: "failed", error: "cancelled" };
+			}
 			const urlWithFolder = appendFolderParam(baseUrl, worktreePath);
-			view.webContents.loadURL(urlWithFolder);
+			try {
+				await view.webContents.loadURL(urlWithFolder);
+			} catch (err) {
+				// loadURL rejects on did-fail-load. Without awaiting we'd emit
+				// "ready" for a dead navigation and leak an unhandled rejection.
+				const error = err instanceof Error ? err.message : String(err);
+				this.cleanupView(paneId);
+				this.emitStatus({ paneId, status: "error", error });
+				return { status: "failed", error };
+			}
+			if (this.isCancelled(paneId, gen)) {
+				this.cleanupView(paneId);
+				return { status: "failed", error: "cancelled" };
+			}
 			this.emitStatus({ paneId, status: "ready" });
 			return { status: "ready", port: shared.port };
 		}
@@ -421,6 +477,9 @@ export class VscodeManager extends EventEmitter {
 	}
 
 	stop(paneId: string): void {
+		// Invalidate any in-flight doStart() for this pane — otherwise it can
+		// still attach a WebContentsView seconds after the tab was closed.
+		this.startGen.set(paneId, (this.startGen.get(paneId) ?? 0) + 1);
 		this.cleanupView(paneId);
 		if (this.entries.size === 0) {
 			this.stopSharedServer();
@@ -429,6 +488,7 @@ export class VscodeManager extends EventEmitter {
 
 	stopAll(): void {
 		for (const paneId of [...this.entries.keys()]) {
+			this.startGen.set(paneId, (this.startGen.get(paneId) ?? 0) + 1);
 			this.cleanupView(paneId);
 		}
 		this.stopSharedServer();
