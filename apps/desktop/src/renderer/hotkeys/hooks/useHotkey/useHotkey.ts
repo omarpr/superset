@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import { type Options, useHotkeys } from "react-hotkeys-hook";
-import { useVscodeFocusStore } from "renderer/stores/vscode-focus";
 import { formatHotkeyDisplay } from "../../display";
 import type { HotkeyId } from "../../registry";
 import { PLATFORM } from "../../registry";
