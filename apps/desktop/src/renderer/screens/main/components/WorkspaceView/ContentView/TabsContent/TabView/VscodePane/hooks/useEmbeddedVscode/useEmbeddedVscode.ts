@@ -200,7 +200,22 @@ export function useEmbeddedVscode({
 		window.addEventListener("resize", onResize);
 		window.addEventListener("scroll", onScroll, true);
 
-		const mo = new MutationObserver(reconcileTwoPass);
+		// Radix and cmdk can emit many mutations per frame while a popper
+		// settles (position updates + data-state flips + child renders). The
+		// observer listens broadly — document.body subtree — because portals
+		// mount as direct body children and we can't narrow further without
+		// missing overlays. Collapse each burst to a single reconcile via rAF
+		// so unrelated DOM churn across the app doesn't drive repeated
+		// querySelectorAll + getBoundingClientRect passes.
+		let moRafHandle: number | null = null;
+		const scheduleMoReconcile = () => {
+			if (moRafHandle !== null) return;
+			moRafHandle = requestAnimationFrame(() => {
+				moRafHandle = null;
+				reconcileTwoPass();
+			});
+		};
+		const mo = new MutationObserver(scheduleMoReconcile);
 		mo.observe(document.body, {
 			childList: true,
 			subtree: true,
@@ -213,6 +228,7 @@ export function useEmbeddedVscode({
 			mo.disconnect();
 			if (flushTimer !== null) window.clearTimeout(flushTimer);
 			if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+			if (moRafHandle !== null) cancelAnimationFrame(moRafHandle);
 			window.removeEventListener("resize", onResize);
 			window.removeEventListener("scroll", onScroll, true);
 			// Any in-flight capture resolving after unmount must be ignored.
