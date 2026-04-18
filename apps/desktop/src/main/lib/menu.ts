@@ -49,7 +49,16 @@ export function createApplicationMenu() {
 				{ role: "minimize" },
 				{ role: "zoom" },
 				{ type: "separator" },
-				{ role: "close" },
+				// Custom click handler instead of { role: "close" } so the menu
+				// item doesn't register the default CmdOrCtrl+W accelerator —
+				// that shortcut belongs to the embedded VS Code (close editor tab)
+				// when it owns keyboard focus.
+				{
+					label: "Close",
+					click: () => {
+						BrowserWindow.getFocusedWindow()?.close();
+					},
+				},
 			],
 		},
 		{
