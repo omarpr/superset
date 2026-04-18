@@ -15,7 +15,6 @@ import { createExternalRouter } from "./external";
 import { createFilesystemRouter } from "./filesystem";
 import { createHostServiceCoordinatorRouter } from "./host-service-coordinator";
 import { createMenuRouter } from "./menu";
-import { createModelProvidersRouter } from "./model-providers";
 import { createNotificationsRouter } from "./notifications";
 import { createPermissionsRouter } from "./permissions";
 import { createPortsRouter } from "./ports";
@@ -42,7 +41,6 @@ export const createAppRouter = (
 		auth: createAuthRouter(),
 		autoUpdate: createAutoUpdateRouter(),
 		cache: createCacheRouter(),
-		modelProviders: createModelProvidersRouter(),
 		window: createWindowRouter(getWindow),
 		projects: createProjectsRouter(getWindow),
 		workspaces: createWorkspacesRouter(),
