@@ -142,8 +142,19 @@ export async function MainWindow() {
 	const vscodeSharedRoot = join(app.getPath("appData"), "superset-vscode");
 	const vscodeServerDataDir = join(vscodeSharedRoot, "server-data");
 	const vscodeBrowserSessionDir = join(vscodeSharedRoot, "browser-session");
-	mkdirSync(vscodeServerDataDir, { recursive: true });
-	mkdirSync(vscodeBrowserSessionDir, { recursive: true });
+	// VS Code is an optional beta feature — a broken Application Support
+	// directory (EACCES, ENOSPC, read-only mount, sandbox quirk) must not
+	// abort window initialization. Swallow the error; VscodeManager.start()
+	// will report a clean "failed" status to the pane on first use.
+	try {
+		mkdirSync(vscodeServerDataDir, { recursive: true });
+		mkdirSync(vscodeBrowserSessionDir, { recursive: true });
+	} catch (error) {
+		console.error(
+			"[main-window] Failed to initialize VS Code data dirs; embedded VS Code will be unavailable:",
+			error,
+		);
+	}
 	// PID file lets the next main-process lifetime reclaim a `code serve-web`
 	// child that survived a dev hot-reload or Electron crash. Without this,
 	// the orphan would hold the pinned port and push us onto an ephemeral
