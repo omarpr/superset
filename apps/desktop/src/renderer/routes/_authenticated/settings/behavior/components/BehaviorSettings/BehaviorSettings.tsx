@@ -205,13 +205,22 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 	};
 
 	const handleVscodeBetaConfirm = () => {
-		const panes = useTabsStore.getState().panes;
-		for (const [paneId, pane] of Object.entries(panes)) {
-			if (pane.type === "vscode") {
-				removePane(paneId);
-			}
-		}
-		setVscodeBetaEnabled.mutate({ enabled: false });
+		// Persist the setting first so a mutation failure (onError rolls the
+		// cache back to `true`) doesn't leave the user with "VS Code: ON" and
+		// no panes. Only tear down panes once the server accepts the disable.
+		setVscodeBetaEnabled.mutate(
+			{ enabled: false },
+			{
+				onSuccess: () => {
+					const panes = useTabsStore.getState().panes;
+					for (const [paneId, pane] of Object.entries(panes)) {
+						if (pane.type === "vscode") {
+							removePane(paneId);
+						}
+					}
+				},
+			},
+		);
 		setVscodeBetaConfirmOpen(false);
 	};
 
