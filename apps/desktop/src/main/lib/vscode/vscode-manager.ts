@@ -189,55 +189,77 @@ export class VscodeManager extends EventEmitter {
 		paneId: string,
 		worktreePath: string,
 	): Promise<VscodeStartResult> {
-		const sharedOrError = await this.ensureShared();
-		if ("error" in sharedOrError) return sharedOrError.error;
-		const shared = sharedOrError;
+		// One retry is enough to cover the "stale shared" race: the exit
+		// handler clears `this.shared`, but a doStart() already mid-flight
+		// still holds a reference to the dead SharedServer and would surface
+		// a "child exited before ready" error even though ensureShared() on
+		// the next tick could spawn a healthy replacement. Two attempts
+		// bounds the recovery so a genuinely broken `code` binary can't spin
+		// forever.
+		const MAX_ATTEMPTS = 2;
+		let lastError: unknown;
+		for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+			const sharedOrError = await this.ensureShared();
+			if ("error" in sharedOrError) return sharedOrError.error;
+			const shared = sharedOrError;
 
-		const window = this.deps.getWindow();
-		if (!window || window.isDestroyed()) {
-			return { status: "failed", error: "no-window" };
-		}
+			const window = this.deps.getWindow();
+			if (!window || window.isDestroyed()) {
+				return { status: "failed", error: "no-window" };
+			}
 
-		const view =
-			this.deps.createView?.() ??
-			(await createDefaultView(this.requireBrowserSessionDir()));
-		view.setVisible(false);
-		view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
-		window.contentView.addChildView(view);
+			const view =
+				this.deps.createView?.() ??
+				(await createDefaultView(this.requireBrowserSessionDir()));
+			view.setVisible(false);
+			view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+			window.contentView.addChildView(view);
 
-		// Forward OS-level focus/blur to the renderer so `useHotkey` can skip
-		// Superset hotkeys while the embedded IDE owns keyboard input. Without
-		// this, `react-hotkeys-hook`'s document listener fires even though the
-		// WebContentsView has focus, intercepting Cmd+P before VS Code sees it.
-		view.webContents.on("focus", () => {
-			this.emitFocus({ paneId, focused: true });
-		});
-		view.webContents.on("blur", () => {
-			this.emitFocus({ paneId, focused: false });
-		});
-
-		this.entries.set(paneId, { view, worktreePath });
-		this.emitStatus({ paneId, status: "starting" });
-
-		let baseUrl: string;
-		try {
-			baseUrl = await shared.readyUrl;
-		} catch (err) {
-			this.cleanupView(paneId);
-			this.emitStatus({
-				paneId,
-				status: "error",
-				error: err instanceof Error ? err.message : String(err),
+			// Forward OS-level focus/blur to the renderer so `useHotkey` can skip
+			// Superset hotkeys while the embedded IDE owns keyboard input. Without
+			// this, `react-hotkeys-hook`'s document listener fires even though the
+			// WebContentsView has focus, intercepting Cmd+P before VS Code sees it.
+			view.webContents.on("focus", () => {
+				this.emitFocus({ paneId, focused: true });
 			});
-			return {
-				status: "failed",
-				error: err instanceof Error ? err.message : String(err),
-			};
+			view.webContents.on("blur", () => {
+				this.emitFocus({ paneId, focused: false });
+			});
+
+			this.entries.set(paneId, { view, worktreePath });
+			this.emitStatus({ paneId, status: "starting" });
+
+			let baseUrl: string;
+			try {
+				baseUrl = await shared.readyUrl;
+			} catch (err) {
+				lastError = err;
+				this.cleanupView(paneId);
+				if (attempt < MAX_ATTEMPTS && this.shared !== shared) {
+					// The exit handler already reaped `this.shared`; our captured
+					// reference is dead. Retry so ensureShared() can spin up a
+					// fresh server on the same (or fallback) port.
+					continue;
+				}
+				this.emitStatus({
+					paneId,
+					status: "error",
+					error: err instanceof Error ? err.message : String(err),
+				});
+				return {
+					status: "failed",
+					error: err instanceof Error ? err.message : String(err),
+				};
+			}
+			const urlWithFolder = appendFolderParam(baseUrl, worktreePath);
+			view.webContents.loadURL(urlWithFolder);
+			this.emitStatus({ paneId, status: "ready" });
+			return { status: "ready", port: shared.port };
 		}
-		const urlWithFolder = appendFolderParam(baseUrl, worktreePath);
-		view.webContents.loadURL(urlWithFolder);
-		this.emitStatus({ paneId, status: "ready" });
-		return { status: "ready", port: shared.port };
+		// Loop always returns on the final attempt via the catch branch.
+		const message =
+			lastError instanceof Error ? lastError.message : String(lastError);
+		return { status: "failed", error: message };
 	}
 
 	private async ensureShared(): Promise<

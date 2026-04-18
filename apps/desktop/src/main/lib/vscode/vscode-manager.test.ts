@@ -212,4 +212,44 @@ describe("VscodeManager", () => {
 		const dataUrl = await manager.capture("unknown");
 		expect(dataUrl).toBeNull();
 	});
+
+	it("retries doStart when the captured shared server dies mid-start", async () => {
+		// First server exits before emitting 'ready'; the second spins up
+		// cleanly. A pane that captured the stale reference must still land
+		// in 'ready' rather than surface the stale exit error.
+		class DyingServer extends EventEmitter {
+			started = false;
+			stopped = false;
+			constructor(public readonly port: number) {
+				super();
+			}
+			async start() {
+				this.started = true;
+				queueMicrotask(() => {
+					this.emit("exit", {
+						code: 1,
+						signal: null,
+						outputTail: "boom",
+					});
+				});
+			}
+			stop() {
+				this.stopped = true;
+			}
+		}
+		let index = 0;
+		const { manager } = makeManager({
+			createServer: (port) => {
+				const s = index === 0 ? new DyingServer(port) : new FakeServer(port);
+				index++;
+				return s as never;
+			},
+		});
+		const result = await manager.start({
+			paneId: "p1",
+			worktreePath: "/tmp/repo",
+		});
+		expect(result.status).toBe("ready");
+		expect(index).toBe(2);
+	});
 });
