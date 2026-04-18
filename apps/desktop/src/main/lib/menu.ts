@@ -52,9 +52,10 @@ export function createApplicationMenu() {
 				// Custom click handler instead of { role: "close" } so the menu
 				// item doesn't register the default CmdOrCtrl+W accelerator —
 				// that shortcut belongs to the embedded VS Code (close editor tab)
-				// when it owns keyboard focus.
+				// when it owns keyboard focus. Mirror the role's platform-correct
+				// label ("Close Window" on macOS, "Close" elsewhere) manually.
 				{
-					label: "Close",
+					label: process.platform === "darwin" ? "Close Window" : "Close",
 					click: () => {
 						BrowserWindow.getFocusedWindow()?.close();
 					},
