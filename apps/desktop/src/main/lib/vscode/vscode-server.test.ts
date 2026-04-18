@@ -58,4 +58,27 @@ describe("VscodeServer", () => {
 			await fs.rm(tmp, { recursive: true, force: true });
 		}
 	});
+
+	it("surfaces spawn errors (ENOENT) as an 'exit' event instead of crashing", async () => {
+		const server = new VscodeServer({
+			command: "/definitely/not/a/real/binary/superset-vscode-missing",
+			worktreePath: "/tmp",
+			port: 12347,
+		});
+		const event = await new Promise<{
+			code: number | null;
+			outputTail: string;
+		}>((resolve, reject) => {
+			server.once("exit", (info: { code: number | null; outputTail: string }) =>
+				resolve(info),
+			);
+			setTimeout(
+				() => reject(new Error("no 'exit' emitted within 2s")),
+				2000,
+			).unref();
+			void server.start();
+		});
+		expect(event.code).toBeNull();
+		expect(event.outputTail).toContain("spawn error");
+	});
 });

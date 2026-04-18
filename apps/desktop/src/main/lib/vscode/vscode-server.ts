@@ -77,6 +77,26 @@ export class VscodeServer extends EventEmitter {
 
 		this.writePidFile(this.child.pid);
 
+		// `isCodeCliAvailable` only checks that `code` resolves on PATH — it
+		// doesn't guarantee the spawn itself succeeds (ENOEXEC, EACCES, broken
+		// symlinks, EMFILE, etc.). Without an 'error' listener the ChildProcess
+		// would propagate the failure as an uncaught exception and crash the
+		// Electron main process. Surface it as an exit event so VscodeManager's
+		// readyUrl can reject cleanly.
+		this.child.once("error", (err) => {
+			const event: VscodeServerExitEvent = {
+				code: null,
+				signal: null,
+				reason: "exited",
+				outputTail: `${this.outputTail}\nspawn error: ${err.message}`.slice(
+					-OUTPUT_TAIL_MAX,
+				),
+			};
+			this.child = null;
+			this.removePidFile();
+			this.emit("exit", event);
+		});
+
 		this.child.stdout?.on("data", (buf: Buffer) => {
 			const text = buf.toString();
 			this.appendOutputTail(text);
