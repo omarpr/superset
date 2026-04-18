@@ -95,7 +95,10 @@ describe("reclaimOrphanServer", () => {
 
 	it("honours a custom commandMarker", () => {
 		const { deps, kill } = makeDeps({ command: "custom-binary --flag" });
-		const result = reclaimOrphanServer({ ...deps, commandMarker: "custom-binary" });
+		const result = reclaimOrphanServer({
+			...deps,
+			commandMarker: "custom-binary",
+		});
 		expect(result).toBe(true);
 		expect(kill).toHaveBeenCalledTimes(1);
 	});

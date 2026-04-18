@@ -355,7 +355,9 @@ export function GroupStrip() {
 			showVscode={vscodeBetaEnabled !== false}
 			vscodeDisabled={vscodeAlreadyOpen}
 			vscodeDisabledReason={
-				vscodeAlreadyOpen ? "VS Code is already open in this workspace" : undefined
+				vscodeAlreadyOpen
+					? "VS Code is already open in this workspace"
+					: undefined
 			}
 			onOpenPreset={handleOpenPreset}
 			onConfigurePresets={handleOpenPresetsSettings}
