@@ -14,7 +14,8 @@ export type PaneType =
 	| "file-viewer"
 	| "chat"
 	| "devtools"
-	| "vscode";
+	| "vscode"
+	| "comment";
 
 /**
  * Pane status for agent lifecycle indicators
@@ -144,6 +145,7 @@ export interface Pane {
 	browser?: BrowserPaneState; // For browser (webview) panes
 	devtools?: DevToolsPaneState; // For devtools panes
 	vscode?: VscodePaneState; // For vscode panes
+	comment?: CommentPaneState; // For comment panes
 	workspaceRun?: {
 		workspaceId: string;
 		state: "running" | "stopped-by-user" | "stopped-by-exit";
@@ -230,6 +232,19 @@ export interface DevToolsPaneState {
 export interface VscodePaneState {
 	/** Absolute worktree path this pane was opened against */
 	worktreePath: string;
+}
+
+/**
+ * Comment pane-specific properties (PR review / conversation comment viewer)
+ */
+export interface CommentPaneState {
+	commentId: string;
+	authorLogin: string;
+	avatarUrl?: string;
+	body: string;
+	url?: string;
+	path?: string;
+	line?: number;
 }
 
 /**

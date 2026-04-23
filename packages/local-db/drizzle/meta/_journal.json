@@ -288,6 +288,13 @@
       "when": 1776419638779,
       "tag": "0040_add_vscode_beta_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1776796221146,
+      "tag": "0040_agent_preset_permissions_migrated_at",
+      "breakpoints": true
     }
   ]
 }

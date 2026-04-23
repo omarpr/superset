@@ -10,11 +10,13 @@ import { MOCK_ORG_ID } from "shared/constants";
 export interface WorkspaceHostOption {
 	id: string;
 	name: string;
-	isCloud: boolean;
+	isOnline: boolean;
 }
 
 interface UseWorkspaceHostOptionsResult {
 	currentDeviceName: string | null;
+	/** v2_hosts.id for the current device (the one running this desktop app). */
+	localHostId: string | null;
 	activeHostUrl: string | null;
 	otherHosts: WorkspaceHostOption[];
 }
@@ -46,6 +48,7 @@ export function useWorkspaceHostOptions(): UseWorkspaceHostOptionsResult {
 					id: hosts.id,
 					machineId: hosts.machineId,
 					name: hosts.name,
+					isOnline: hosts.isOnline,
 				})),
 		[activeOrganizationId, collections, currentUserId],
 	);
@@ -62,7 +65,7 @@ export function useWorkspaceHostOptions(): UseWorkspaceHostOptionsResult {
 				.map((host) => ({
 					id: host.id,
 					name: host.name,
-					isCloud: host.machineId == null,
+					isOnline: host.isOnline ?? false,
 				}))
 				.sort((a, b) => a.name.localeCompare(b.name)),
 		[accessibleHosts, machineId],
@@ -70,6 +73,7 @@ export function useWorkspaceHostOptions(): UseWorkspaceHostOptionsResult {
 
 	return {
 		currentDeviceName: localHost?.name ?? null,
+		localHostId: localHost?.id ?? null,
 		activeHostUrl,
 		otherHosts,
 	};

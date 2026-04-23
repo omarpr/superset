@@ -9,6 +9,11 @@ import { uploadChatAttachment } from "./utils/upload-chat-attachment";
 
 const AVAILABLE_MODELS = [
 	{
+		id: "anthropic/claude-opus-4-7",
+		name: "Opus 4.7",
+		provider: "Anthropic",
+	},
+	{
 		id: "anthropic/claude-opus-4-6",
 		name: "Opus 4.6",
 		provider: "Anthropic",
@@ -48,7 +53,7 @@ export const chatRouter = {
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			const organizationId = ctx.session.session.activeOrganizationId;
+			const organizationId = ctx.activeOrganizationId;
 
 			if (!organizationId) {
 				throw new TRPCError({
@@ -80,7 +85,7 @@ export const chatRouter = {
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			const organizationId = ctx.session.session.activeOrganizationId;
+			const organizationId = ctx.activeOrganizationId;
 
 			if (!organizationId) {
 				throw new TRPCError({
@@ -116,7 +121,7 @@ export const chatRouter = {
 	deleteSession: protectedProcedure
 		.input(z.object({ sessionId: z.uuid() }))
 		.mutation(async ({ ctx, input }) => {
-			const organizationId = ctx.session.session.activeOrganizationId;
+			const organizationId = ctx.activeOrganizationId;
 
 			if (!organizationId) {
 				throw new TRPCError({
