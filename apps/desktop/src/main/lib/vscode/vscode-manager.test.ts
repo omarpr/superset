@@ -290,13 +290,13 @@ describe("VscodeManager", () => {
 		// stop() bumps a generation counter that doStart() re-checks after
 		// each await. If the pane was closed mid-boot, we must not attach a
 		// WebContentsView for a tab that no longer exists.
-		let releaseReady: (() => void) | null = null;
+		const controls: { releaseReady?: () => void } = {};
 		class SlowServer extends EventEmitter {
 			constructor(public readonly port: number) {
 				super();
 			}
 			async start() {
-				releaseReady = () => {
+				controls.releaseReady = () => {
 					this.emit("ready", { url: `http://127.0.0.1:${this.port}/` });
 				};
 			}
@@ -312,7 +312,9 @@ describe("VscodeManager", () => {
 		// Let doStart() reach `await shared.readyUrl` before we stop.
 		await new Promise((r) => setTimeout(r, 0));
 		manager.stop("p1");
-		releaseReady?.();
+		const releaseReady = controls.releaseReady;
+		if (!releaseReady) throw new Error("SlowServer did not start");
+		releaseReady();
 		const result = await startPromise;
 		expect(result.status).toBe("failed");
 		expect(result.error).toBe("cancelled");
