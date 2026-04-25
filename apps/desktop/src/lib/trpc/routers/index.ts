@@ -48,7 +48,7 @@ export const createAppRouter = (
 		terminal: createTerminalRouter(),
 		changes: createChangesRouter(),
 		filesystem: createFilesystemRouter(),
-		notifications: createNotificationsRouter(),
+		notifications: createNotificationsRouter(getWindow),
 		permissions: createPermissionsRouter(),
 		ports: createPortsRouter(),
 		resourceMetrics: createResourceMetricsRouter(),
